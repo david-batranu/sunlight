@@ -2,7 +2,7 @@
  * Tiny observable application store. The lead owns this file.
  */
 
-import type { AppError, CurrentLight, LoadPhase } from './contracts.ts';
+import type { AppError, CurrentLight, HoverInfo, LoadPhase } from './contracts.ts';
 import type { CityInfo, CityModel, JobProgress, SkyDay } from '../../shared/types.ts';
 import { DEFAULT_CITY_GEONAME_ID, SEED_BY_GEONAME_ID } from '../../shared/constants.ts';
 
@@ -25,6 +25,12 @@ export interface AppState {
   generatingName: string | null;
   error: AppError | null;
   current: CurrentLight | null;
+  /** Camera azimuth in degrees, used by the orientation compass. */
+  cameraAzimuthDeg: number;
+  /** Feature under the pointer / tapped feature, or null. */
+  hover: HoverInfo | null;
+  /** True while the user is choosing a new model centre on the diorama. */
+  pickingArea: boolean;
   notices: string[];
   viewerTz: string;
 }
@@ -106,6 +112,9 @@ export function createInitialState(): AppState {
     generatingName: null,
     error: null,
     current: null,
+    cameraAzimuthDeg: 45,
+    hover: null,
+    pickingArea: false,
     notices: [],
     viewerTz: viewerTimezone()
   };

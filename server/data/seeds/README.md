@@ -19,8 +19,8 @@ server/data/seeds/
 ```json
 {
   "v": 1,
-  "modelVersion": 1,
-  "radiusM": 900,
+  "modelVersion": 2,
+  "radiusM": 1500,
   "generatedAt": "2026-01-01T00:00:00.000Z",
   "attribution": "© OpenStreetMap contributors (ODbL 1.0)",
   "cities": [
@@ -28,13 +28,13 @@ server/data/seeds/
       "slug": "brasov",
       "geonameId": 683844,
       "name": "Brașov",
-      "key": "gn-683844-r900-v1",
+      "key": "gn-683844-r1500-v2",
       "file": "brasov.json.gz",
-      "bytes": 81523,
+      "bytes": 372979,
       "sha256": "<lowercase hex sha256 of the gzipped bytes>",
-      "modelVersion": 1,
-      "radiusM": 900,
-      "source": "overpass",
+      "modelVersion": 2,
+      "radiusM": 1500,
+      "source": "osm-api",
       "generatedAt": "2026-01-01T00:00:00.000Z",
       "stats": { "buildings": 4812, "roads": 530, "areas": 44, "dropped": 0 }
     }

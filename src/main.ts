@@ -35,6 +35,16 @@ import { createUI } from './ui/shell.ts';
 
 const POLL_INTERVAL_MS = 700;
 const SKY_PREFETCH_DELAY_MS = 1200;
+const HOVER_THROTTLE_MS = 70;
+const STICKY_TOOLTIP_MS = 5000;
+const METRES_PER_DEGREE = 111_320;
+
+interface LoadOptions {
+  /** New-city selection: always jump to that city's current local date/time. */
+  resetToNow?: boolean;
+  /** Keep the currently displayed local date/time (area recentering). */
+  preserveTime?: boolean;
+}
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
 const uiRoot = document.querySelector<HTMLElement>('#ui');
@@ -194,18 +204,33 @@ async function applySky(date: string, token: number): Promise<void> {
 /* Model loading                                                      */
 /* ------------------------------------------------------------------ */
 
-async function applyModel(model: CityModel, token: number): Promise<void> {
+async function applyModel(model: CityModel, token: number, options: LoadOptions = {}): Promise<void> {
   if (token !== loadToken) return;
   rememberModel(model);
   const tz = model.city.tz;
   const state = store.getState();
-  const date = explicitDate && isValidDateString(explicitDate) ? clampDate(explicitDate) : todayInTimezone(tz);
-  const minute =
-    explicitMinute != null
-      ? Math.max(0, Math.min(1439, explicitMinute))
-      : userTouchedTime
-        ? Math.max(0, Math.min(1439, state.minute))
-        : minuteNowInTimezone(tz);
+  let date: string;
+  let minute: number;
+  if (options.resetToNow) {
+    date = todayInTimezone(tz);
+    minute = minuteNowInTimezone(tz);
+    explicitDate = null;
+    explicitMinute = null;
+    userTouchedTime = false;
+  } else if (options.preserveTime) {
+    date = state.date;
+    minute = state.minute;
+    explicitDate = date;
+    explicitMinute = Math.floor(minute);
+  } else {
+    date = explicitDate && isValidDateString(explicitDate) ? clampDate(explicitDate) : todayInTimezone(tz);
+    minute =
+      explicitMinute != null
+        ? Math.max(0, Math.min(1439, explicitMinute))
+        : userTouchedTime
+          ? Math.max(0, Math.min(1439, state.minute))
+          : minuteNowInTimezone(tz);
+  }
 
   store.setState({
     city: model.city,
@@ -228,7 +253,7 @@ async function applyModel(model: CityModel, token: number): Promise<void> {
   }
 }
 
-async function loadCity(target: ModelTarget, label?: string | null): Promise<void> {
+async function loadCity(target: ModelTarget, label?: string | null, options: LoadOptions = {}): Promise<void> {
   const token = ++loadToken;
   activeTarget = target;
   labelHint = label ?? null;
@@ -253,7 +278,7 @@ async function loadCity(target: ModelTarget, label?: string | null): Promise<voi
     if (created.state === 'ready') {
       store.setState({ phase: 'loading' });
       const model = recallModel(created.key) ?? (await api.loadModel(created.key));
-      await applyModel(model, token);
+      await applyModel(model, token, options);
       return;
     }
 
@@ -262,7 +287,7 @@ async function loadCity(target: ModelTarget, label?: string | null): Promise<voi
       phase: 'generating',
       progress: { step: 'fetch', label: 'Queued', percent: 2 }
     });
-    await pollJob(created.jobId, created.key, token);
+    await pollJob(created.jobId, created.key, token, options);
   } catch (error) {
     if (token !== loadToken) return;
     const info = errorFromUnknown(error);
@@ -276,7 +301,7 @@ async function loadCity(target: ModelTarget, label?: string | null): Promise<voi
   }
 }
 
-async function pollJob(jobId: string, key: string, token: number): Promise<void> {
+async function pollJob(jobId: string, key: string, token: number, options: LoadOptions = {}): Promise<void> {
   while (token === loadToken && !destroyed) {
     let job;
     try {
@@ -297,7 +322,7 @@ async function pollJob(jobId: string, key: string, token: number): Promise<void>
       store.setState({ phase: 'loading', progress: { step: 'write', label: 'Ready', percent: 100 } });
       try {
         const model = await api.loadModel(key);
-        await applyModel(model, token);
+        await applyModel(model, token, options);
       } catch (error) {
         if (token !== loadToken) return;
         const info = errorFromUnknown(error);
@@ -434,7 +459,13 @@ function playbackTick(now: number): void {
     lastCommitAt = now;
     lastPublishedMinute = playheadMinute;
     const current = setCurrentFromSky(store.getState().sky, playheadMinute);
-    store.setState({ minute: playheadMinute, current });
+    const cameraAzimuthDeg = scene.getCameraAzimuth();
+    const previousAzimuth = store.getState().cameraAzimuthDeg;
+    store.setState({
+      minute: playheadMinute,
+      current,
+      ...(Math.abs(cameraAzimuthDeg - previousAzimuth) > 0.2 ? { cameraAzimuthDeg } : {})
+    });
   }
 
   requestAnimationFrame(playbackTick);
@@ -446,11 +477,11 @@ function playbackTick(now: number): void {
 
 const actions: AppActions = {
   selectCity(target) {
-    void loadCity(target);
+    void loadCity(target, undefined, { resetToNow: true });
   },
 
   selectSearchResult(result) {
-    void loadCity(targetFromSearchResult(result), result.name);
+    void loadCity(targetFromSearchResult(result), result.name, { resetToNow: true });
   },
 
   async locate() {
@@ -469,12 +500,14 @@ const actions: AppActions = {
             if (nearest.distanceKm <= 80) {
               void loadCity(
                 { kind: 'city', geonameId: nearest.city.geonameId },
-                nearest.city.name
+                nearest.city.name,
+                { resetToNow: true }
               );
             } else {
               void loadCity(
                 { kind: 'point', lat: latitude, lon: longitude, name: 'My location' },
-                'My location'
+                'My location',
+                { resetToNow: true }
               );
             }
           } catch (error) {
@@ -554,6 +587,7 @@ const actions: AppActions = {
 
   resetCamera() {
     scene.resetCamera();
+    store.setState({ cameraAzimuthDeg: scene.getCameraAzimuth() });
   },
 
   retry() {
@@ -591,10 +625,137 @@ const actions: AppActions = {
     }
   },
 
+  beginAreaPick() {
+    const state = store.getState();
+    if (state.phase !== 'ready' || !state.model) return;
+    store.setState({ pickingArea: true, hover: null });
+    addNotice('Tap or click the city to move the model there. Esc cancels.');
+  },
+
+  cancelAreaPick() {
+    if (store.getState().pickingArea) store.setState({ pickingArea: false });
+  },
+
+  dismissHover() {
+    if (store.getState().hover) store.setState({ hover: null });
+  },
+
   dismissNotices() {
     setNotices([]);
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* Diorama pointer interaction: tooltips + choose-area               */
+/* ------------------------------------------------------------------ */
+
+let pointerDownAt: { x: number; y: number } | null = null;
+let lastHoverAt = 0;
+let stickyTimer: number | null = null;
+
+function clearStickyTimer(): void {
+  if (stickyTimer !== null) {
+    window.clearTimeout(stickyTimer);
+    stickyTimer = null;
+  }
+}
+
+function hideHover(force = false): void {
+  const hover = store.getState().hover;
+  if (!hover) return;
+  if (!force && hover.sticky) return;
+  clearStickyTimer();
+  store.setState({ hover: null });
+}
+
+function scheduleStickyHide(): void {
+  clearStickyTimer();
+  stickyTimer = window.setTimeout(() => {
+    stickyTimer = null;
+    if (store.getState().hover?.sticky) store.setState({ hover: null });
+  }, STICKY_TOOLTIP_MS);
+}
+
+function showTooltip(clientX: number, clientY: number, sticky: boolean): void {
+  const feature = scene.hitTest(clientX, clientY);
+  if (!feature) {
+    hideHover(true);
+    return;
+  }
+  store.setState({ hover: { feature, x: clientX, y: clientY, sticky } });
+  if (sticky) scheduleStickyHide();
+  else clearStickyTimer();
+}
+
+/** Inverse of the server's local equirectangular projection (metres → WGS84). */
+function latLonFromGround(x: number, z: number): { lat: number; lon: number } | null {
+  const city = store.getState().city;
+  if (!city) return null;
+  const cosLat = Math.max(0.0001, Math.cos((city.lat * Math.PI) / 180));
+  return {
+    lat: city.lat - z / METRES_PER_DEGREE,
+    lon: city.lon + x / (METRES_PER_DEGREE * cosLat)
+  };
+}
+
+canvas.addEventListener('pointermove', (event) => {
+  if (event.pointerType !== 'mouse' || event.buttons !== 0) return;
+  const state = store.getState();
+  if (state.pickingArea || state.phase !== 'ready') return;
+  const now = performance.now();
+  if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
+  lastHoverAt = now;
+  const current = state.hover;
+  if (current?.sticky) return;
+  showTooltip(event.clientX, event.clientY, false);
+});
+
+canvas.addEventListener('pointerleave', () => {
+  hideHover();
+  pointerDownAt = null;
+});
+
+canvas.addEventListener('pointerdown', (event) => {
+  pointerDownAt = { x: event.clientX, y: event.clientY };
+  hideHover();
+});
+
+canvas.addEventListener('pointercancel', () => {
+  pointerDownAt = null;
+  hideHover(true);
+});
+
+canvas.addEventListener('pointerup', (event) => {
+  const start = pointerDownAt;
+  pointerDownAt = null;
+  if (!start) return;
+  const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+  if (moved > 8) return;
+
+  const state = store.getState();
+  if (state.pickingArea) {
+    const ground = scene.getGroundPoint(event.clientX, event.clientY);
+    if (!ground) {
+      store.setState({ pickingArea: false });
+      addNotice('Could not read that point on the model. Try again.');
+      return;
+    }
+    const latLon = latLonFromGround(ground.x, ground.z);
+    if (!latLon) {
+      store.setState({ pickingArea: false });
+      return;
+    }
+    const name = `Near ${state.city?.name ?? 'here'}`;
+    store.setState({ pickingArea: false, hover: null });
+    addNotice(`Moving the model to ${latLon.lat.toFixed(4)}, ${latLon.lon.toFixed(4)}…`);
+    void loadCity({ kind: 'point', lat: latLon.lat, lon: latLon.lon, name }, name, {
+      preserveTime: true
+    });
+    return;
+  }
+
+  if (state.phase === 'ready') showTooltip(event.clientX, event.clientY, true);
+});
 
 /* ------------------------------------------------------------------ */
 /* UI + subscription                                                  */
@@ -612,6 +773,10 @@ ui.update(store.getState());
 
 store.subscribe((state, previous) => {
   if (state.model !== previous.model && state.model) {
+    if (state.hover || state.pickingArea) {
+      clearStickyTimer();
+      store.setState({ hover: null, pickingArea: false });
+    }
     scene.setModel(state.model);
     scene.setTime(state.minute);
   }
@@ -638,7 +803,9 @@ declare global {
       getState: () => AppState;
       getSceneDebug: () => ReturnType<SceneHandle['getDebug']>;
       actions: AppActions;
-      loadCity: (target: ModelTarget) => Promise<void>;
+      loadCity: (target: ModelTarget, label?: string | null, options?: LoadOptions) => Promise<void>;
+      hitTest: (x: number, y: number) => ReturnType<SceneHandle['hitTest']>;
+      getGroundPoint: (x: number, y: number) => ReturnType<SceneHandle['getGroundPoint']>;
       api: typeof api;
       formatMinuteOfDay: typeof formatMinuteOfDay;
     };
@@ -649,6 +816,8 @@ window.__sunlight = {
   getSceneDebug: () => scene.getDebug(),
   actions,
   loadCity,
+  hitTest: (x, y) => scene.hitTest(x, y),
+  getGroundPoint: (x, y) => scene.getGroundPoint(x, y),
   api,
   formatMinuteOfDay
 };

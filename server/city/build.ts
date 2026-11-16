@@ -49,6 +49,7 @@ import {
   simplifyRing,
   type Point
 } from './geometry.ts';
+import { isNamedLandmark, MAX_NAMED_BUILDINGS, osmName, shortKindLabel } from './names.ts';
 import { assembleRelationRings } from './osm/rings.ts';
 import type { OsmTags, RawOsmData } from './raw.ts';
 import { buildNodeIndex, dedupeWarnings, indexWays, memberCoordinates, wayCoordinates } from './raw.ts';
@@ -124,6 +125,7 @@ interface AreaDraft {
   minX: number;
   minZ: number;
   hash: number;
+  name: string | null;
 }
 
 interface RoadDraft {
@@ -133,6 +135,7 @@ interface RoadDraft {
   minX: number;
   minZ: number;
   hash: number;
+  name: string | null;
 }
 
 interface FeatureStats {
@@ -229,7 +232,7 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
   report(16, 'Processing building footprints', `${raw.ways.length} ways`);
   const buildingWays: Array<{ id: string; tags: OsmTags; outer: Point[] }> = [];
   const areaWayFeatures: Array<{ id: string; tags: OsmTags; kind: AreaKind; outer: Point[]; holes: Point[][] }> = [];
-  const roadFeatures: Array<{ id: string; cls: RoadRecord['c']; points: Point[] }> = [];
+  const roadFeatures: Array<{ id: string; cls: RoadRecord['c']; points: Point[]; tags: OsmTags }> = [];
 
   for (const way of raw.ways) {
     const tags = way.tags;
@@ -265,7 +268,7 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
     const roadClass = classifyRoad(tags);
     if (roadClass !== 0) {
       const points = coords.map((coord) => projection.project(coord.lat, coord.lon));
-      roadFeatures.push({ id: `w${way.id}`, cls: roadClass, points });
+      roadFeatures.push({ id: `w${way.id}`, cls: roadClass, points, tags });
     }
   }
 
@@ -332,7 +335,16 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
       holes.push(flatHole);
     }
     const box = flatBounds(flat);
-    areaDrafts.push({ id: feature.id, kind: feature.kind, flat, holes, minX: box.minX, minZ: box.minZ, hash: hash32(feature.id) });
+    areaDrafts.push({
+      id: feature.id,
+      kind: feature.kind,
+      flat,
+      holes,
+      minX: box.minX,
+      minZ: box.minZ,
+      hash: hash32(feature.id),
+      name: osmName(feature.tags)
+    });
   }
 
   const roadDrafts: RoadDraft[] = [];
@@ -352,7 +364,8 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
         flat,
         minX: box.minX,
         minZ: box.minZ,
-        hash: hash32(feature.id)
+        hash: hash32(feature.id),
+        name: osmName(feature.tags)
       });
     }
     if (!anyPiece) {
@@ -362,7 +375,10 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
   }
 
   report(72, 'Inferring building heights and types');
-  const { buildings, dropped } = finalizeBuildings(buildingDrafts);
+  const { buildings, dropped, trimmedNames } = finalizeBuildings(buildingDrafts);
+  if (trimmedNames > 0) {
+    addCount(diagnostics, 'dropped landmark names above the cap', trimmedNames);
+  }
 
   const roads = finalizeRoads(roadDrafts);
   const areas = finalizeAreas(areaDrafts);
@@ -417,7 +433,11 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
 /* Finalization / ordering                                             */
 /* ------------------------------------------------------------------ */
 
-function finalizeBuildings(drafts: BuildingDraft[]): { buildings: BuildingRecord[]; dropped: number } {
+function finalizeBuildings(drafts: BuildingDraft[]): {
+  buildings: BuildingRecord[];
+  dropped: number;
+  trimmedNames: number;
+} {
   const knownHeightCells = new Map<string, number[]>();
   const allKnown: number[] = [];
   for (const draft of drafts) {
@@ -440,7 +460,16 @@ function finalizeBuildings(drafts: BuildingDraft[]): { buildings: BuildingRecord
     dropped = drafts.length - MAX_BUILDINGS;
   }
 
-  const records: Array<{ record: BuildingRecord; draft: BuildingDraft }> = [];
+  interface NamedCandidate {
+    id: string;
+    areaDm2: number;
+    hash: number;
+    name: string;
+    kind: string | null;
+  }
+
+  const records: Array<{ record: BuildingRecord; draft: BuildingDraft; name: string | null; kind: string | null }> = [];
+  const named: NamedCandidate[] = [];
   for (const draft of selected) {
     const type: BuildingType = classifyBuildingType(draft.tags);
     const heightM = resolveHeightM(draft, type, knownHeightCells, globalMedian);
@@ -451,8 +480,24 @@ function finalizeBuildings(drafts: BuildingDraft[]): { buildings: BuildingRecord
       t: type,
       r: roofEligible(draft.tags, type, areaM2, heightM)
     };
-    records.push({ record, draft });
+    const name = isNamedLandmark(draft.tags, type, heightM) ? osmName(draft.tags) : null;
+    const kind = name ? shortKindLabel(draft.tags) : null;
+    if (name) named.push({ id: draft.id, areaDm2: draft.areaDm2, hash: draft.hash, name, kind });
+    records.push({ record, draft, name, kind });
   }
+
+  // Cap landmark names: keep the largest footprints (deterministic ties) so
+  // tooltip data never dominates model size in dense city centres.
+  let allowedNames: ReadonlySet<string> | null = null;
+  let trimmedNames = 0;
+  if (named.length > MAX_NAMED_BUILDINGS) {
+    const byArea = [...named].sort(
+      (a, b) => b.areaDm2 - a.areaDm2 || a.hash - b.hash || compareIds(a.id, b.id)
+    );
+    allowedNames = new Set(byArea.slice(0, MAX_NAMED_BUILDINGS).map((candidate) => candidate.id));
+    trimmedNames = named.length - MAX_NAMED_BUILDINGS;
+  }
+
   records.sort(
     (a, b) =>
       a.draft.minX - b.draft.minX ||
@@ -461,7 +506,15 @@ function finalizeBuildings(drafts: BuildingDraft[]): { buildings: BuildingRecord
       a.draft.hash - b.draft.hash ||
       compareIds(a.draft.id, b.draft.id)
   );
-  return { buildings: records.map((entry) => entry.record), dropped };
+  const buildings = records.map((entry) => {
+    const { record, draft, name, kind } = entry;
+    if (name && (allowedNames === null || allowedNames.has(draft.id))) {
+      record.n = name;
+      if (kind) record.k = kind;
+    }
+    return record;
+  });
+  return { buildings, dropped, trimmedNames };
 }
 
 function resolveHeightM(
@@ -491,7 +544,11 @@ function finalizeRoads(drafts: RoadDraft[]): RoadRecord[] {
   drafts.sort(
     (a, b) => a.cls - b.cls || a.minX - b.minX || a.minZ - b.minZ || a.hash - b.hash || compareIds(a.id, b.id)
   );
-  return drafts.map((draft) => ({ c: draft.cls, p: draft.flat }));
+  return drafts.map((draft) => {
+    const record: RoadRecord = { c: draft.cls, p: draft.flat };
+    if (draft.name) record.n = draft.name;
+    return record;
+  });
 }
 
 function finalizeAreas(drafts: AreaDraft[]): AreaRecord[] {
@@ -501,6 +558,7 @@ function finalizeAreas(drafts: AreaDraft[]): AreaRecord[] {
   return drafts.map((draft) => {
     const record: AreaRecord = { k: draft.kind, p: draft.flat };
     if (draft.holes.length > 0) record.holes = draft.holes;
+    if (draft.name) record.n = draft.name;
     return record;
   });
 }

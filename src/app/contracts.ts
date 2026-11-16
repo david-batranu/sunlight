@@ -42,10 +42,32 @@ export interface AppActions {
   goToday(): void;
   setNow(): void;
   resetCamera(): void;
+  beginAreaPick(): void;
+  cancelAreaPick(): void;
+  dismissHover(): void;
   retry(): void;
   cancelGeneration(): void;
   copyLink(): Promise<boolean>;
   dismissNotices(): void;
+}
+
+export interface HitFeature {
+  kind: 'building' | 'road' | 'area';
+  /** Display name from OSM, when the feature is named. */
+  name: string;
+  /** Short human label, e.g. "Church", "Primary street", "Park". */
+  kindLabel: string;
+  /** Building height in metres, when the hit feature is a building. */
+  heightM?: number;
+}
+
+export interface HoverInfo {
+  feature: HitFeature;
+  /** Viewport-space pointer position in CSS pixels. */
+  x: number;
+  y: number;
+  /** True for a tapped/clicked feature; false while hovering. */
+  sticky: boolean;
 }
 
 export interface SceneDebug {
@@ -76,6 +98,12 @@ export interface SceneHandle {
   resize(): void;
   dispose(): void;
   getDebug(): SceneDebug;
+  /** Raycasts the city meshes and returns the named feature under the pointer. */
+  hitTest(clientX: number, clientY: number): HitFeature | null;
+  /** Camera azimuth in degrees (direction from the look target toward the camera). */
+  getCameraAzimuth(): number;
+  /** Ground-plane point (metres, model space) under a viewport pixel. */
+  getGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null;
 }
 
 export interface UIContext {

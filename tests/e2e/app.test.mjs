@@ -14,6 +14,7 @@ import {
   BRASOV_COORDS,
   CLUJ,
   MOBILE,
+  SHOTS,
   assertNoErrors,
   canvasPixelStats,
   gotoReady,
@@ -422,3 +423,168 @@ test('mobile 390x844: key controls visible, usable, no horizontal overflow', asy
     { viewport: MOBILE, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }
   );
 });
+
+test('wide model: 1500 m city, named landmarks and a camera-following compass', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+    const state = await readState(page);
+    assert.equal(state.radiusM, 1500);
+    assert.ok((state.stats?.buildings ?? 0) > 5000, `expected a wide city, got ${state.stats?.buildings}`);
+    assert.ok(state.namedBuildings > 50, `expected named landmarks, got ${state.namedBuildings}`);
+    assert.ok(state.namedRoads > 100, `expected named roads, got ${state.namedRoads}`);
+
+    const compass = page.locator('[data-testid="compass"]');
+    await compass.waitFor({ state: 'visible' });
+    const before = await page.evaluate(() => ({
+      rotation: document.querySelector('.sl-compass-rotor')?.getAttribute('transform') ?? '',
+      azimuth: window.__sunlight.getState().cameraAzimuthDeg,
+      caption: document.querySelector('[data-testid="compass-view"]')?.textContent ?? ''
+    }));
+
+    const box = await page.locator('#scene').boundingBox();
+    assert.ok(box);
+    await page.keyboard.down('Shift');
+    await page.mouse.move(box.x + 700, box.y + 450);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 820, box.y + 450, { steps: 10 });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    await page.waitForFunction(
+      (azimuth) => Math.abs(window.__sunlight.getState().cameraAzimuthDeg - azimuth) > 5,
+      before.azimuth,
+      { timeout: 5000 }
+    );
+    const after = await page.evaluate(() => ({
+      rotation: document.querySelector('.sl-compass-rotor')?.getAttribute('transform') ?? '',
+      azimuth: window.__sunlight.getState().cameraAzimuthDeg,
+      caption: document.querySelector('[data-testid="compass-view"]')?.textContent ?? ''
+    }));
+    assert.notEqual(after.rotation, before.rotation, 'compass rose should rotate with the camera');
+    assert.notEqual(after.caption, before.caption, 'compass caption should follow the camera');
+
+    await compass.click();
+    await page.waitForFunction(
+      () => Math.abs(window.__sunlight.getState().cameraAzimuthDeg - 45) < 0.8,
+      null,
+      { timeout: 5000 }
+    );
+  });
+});
+
+test('hover and tap tooltips identify named city features', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+    const hit = await page.evaluate(() => {
+      for (let y = 160; y < 800; y += 12) {
+        for (let x = 200; x < 1150; x += 12) {
+          const feature = window.__sunlight.hitTest(x, y);
+          if (feature?.name) return { x, y, feature };
+        }
+      }
+      return null;
+    });
+    assert.ok(hit, 'expected to find a named feature by scanning the diorama');
+
+    await page.mouse.move(hit.x, hit.y);
+    await page.waitForFunction(() => !!window.__sunlight.getState().hover, null, { timeout: 5000 });
+    const tooltip = page.locator('[data-testid="feature-tooltip"]');
+    await tooltip.waitFor({ state: 'visible' });
+    assert.match((await tooltip.textContent()) ?? '', new RegExp(escapeRegex(hit.feature.name)));
+    const hoverState = await readState(page);
+    assert.equal(hoverState.hover?.name, hit.feature.name);
+    assert.equal(hoverState.hover?.sticky, false);
+
+    await page.mouse.click(hit.x, hit.y);
+    await page.waitForFunction(() => window.__sunlight.getState().hover?.sticky === true, null, {
+      timeout: 5000
+    });
+    assert.equal(await page.locator('[data-testid="tooltip-close"]').isVisible(), true);
+    await page.screenshot({ path: `${SHOTS}/feature-tooltip.png` });
+
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__sunlight.getState().hover === null, null, {
+      timeout: 5000
+    });
+  });
+});
+
+test('choose-area mode exposes a cancelable pick hint', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+    const button = page.locator('[data-testid="area-pick"]');
+    await button.waitFor({ state: 'visible' });
+    await button.click();
+    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === true);
+    assert.equal(await page.locator('[data-testid="area-pick-hint"]').isVisible(), true);
+    assert.equal(await page.evaluate(() => document.body.dataset.picking), 'true');
+    assert.equal(await button.getAttribute('aria-pressed'), 'true');
+
+    await page.locator('[data-testid="area-pick-cancel"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === false);
+    assert.equal(await page.locator('[data-testid="area-pick-hint"]').isVisible(), false);
+
+    await button.click();
+    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === true);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === false);
+  });
+});
+
+test('switching cities resets the clock to the new city\'s local now', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=1900-01-01&time=00:30');
+    const before = await readState(page);
+    assert.equal(before.date, '1900-01-01');
+    assert.equal(Math.round(before.minute), 30);
+
+    await page.evaluate(() =>
+      window.__sunlight.actions.selectSearchResult({
+        geonameId: 681290,
+        name: 'Cluj-Napoca',
+        asciiName: 'Cluj-Napoca',
+        country: 'RO',
+        countryName: 'Romania',
+        lat: 46.76667,
+        lon: 23.6,
+        tz: 'Europe/Bucharest',
+        population: 286598,
+        seed: true,
+        seedSlug: 'cluj-napoca'
+      })
+    );
+    await page.waitForFunction(
+      () => window.__sunlight.getState().city?.geonameId === 681290 && window.__sunlight.getState().phase === 'ready',
+      null,
+      { timeout: 30_000 }
+    );
+    const after = await readState(page);
+    const expected = await page.evaluate(() => {
+      const tz = window.__sunlight.getState().city.tz;
+      const now = new Date();
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).formatToParts(now);
+      const get = (type) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+      const clock = new Intl.DateTimeFormat('en-GB', {
+        timeZone: tz,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).format(now);
+      const [hour, minute] = clock.split(':').map(Number);
+      return { date: `${get('year')}-${String(get('month')).padStart(2, '0')}-${String(get('day')).padStart(2, '0')}`, minute: hour * 60 + minute };
+    });
+    assert.equal(after.date, expected.date, 'new city should start on its local today');
+    assert.ok(
+      Math.abs(after.minute - expected.minute) <= 5,
+      `new city should start near its local now (${after.minute} vs ${expected.minute})`
+    );
+  });
+});
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

@@ -57,12 +57,18 @@ export interface BuildingRecord {
   t: BuildingType;
   /** 1 when the renderer may add a simple pitched roof. */
   r?: 0 | 1;
+  /** Display name for a landmark building (OSM name tag). */
+  n?: string;
+  /** Short kind label derived from OSM tags, e.g. "Church", "Museum", "Hotel". */
+  k?: string;
 }
 
 /** 1 arterial, 2 primary, 3 secondary, 4 local/pedestrian, 9 rail. */
 export interface RoadRecord {
   c: number;
   p: number[];
+  /** Road or street name from OSM. */
+  n?: string;
 }
 
 /** 1 water, 2 park, 3 forest, 4 grass/plaza. */
@@ -70,6 +76,8 @@ export interface AreaRecord {
   k: number;
   p: number[];
   holes?: number[][];
+  /** Park, water or square name from OSM. */
+  n?: string;
 }
 
 export interface CityModel {

@@ -10,7 +10,7 @@ services:
       HOST: "0.0.0.0"
       CACHE_DIR: "/data/cache"
       CACHE_MAX_MB: "1024"
-      CITY_RADIUS_M: "900"
+      CITY_RADIUS_M: "1500"
       GENERATION_CONCURRENCY: "1"
       CITY_SOURCE: "auto"
       DEFAULT_CITY: "gn-683844"

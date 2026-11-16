@@ -48,6 +48,9 @@ export function createTopBar(ctx: UIContext, callbacks: TopBarCallbacks): TopBar
       <button class="sl-btn sl-btn--icon" type="button" data-testid="locate" aria-keyshortcuts="L" aria-label="Use my location" title="Use my location (L)">
         ${icon('locate')}<span class="sl-btn-label">Locate</span>
       </button>
+      <button class="sl-btn sl-btn--icon sl-btn--area" type="button" data-testid="area-pick" aria-pressed="false" aria-label="Choose area on the map" title="Choose a new area for the model">
+        ${icon('areaPick')}<span class="sl-btn-label">Choose area</span>
+      </button>
       <button class="sl-btn sl-btn--icon" type="button" data-testid="reset-camera" aria-keyshortcuts="R" aria-label="Reset the camera" title="Reset the camera (R)">
         ${icon('reset')}<span class="sl-btn-label">Reset view</span>
       </button>
@@ -65,11 +68,16 @@ export function createTopBar(ctx: UIContext, callbacks: TopBarCallbacks): TopBar
   const cityName = q<HTMLElement>(element, '[data-testid="city-name"]');
   const cityMeta = q<HTMLElement>(element, '[data-testid="city-meta"]');
   const openSearch = q<HTMLElement>(element, '[data-testid="open-search"]');
+  const areaPickButton = q<HTMLButtonElement>(element, '[data-testid="area-pick"]');
 
   const cleanup = [
     on(cityChip, 'click', () => callbacks.onOpenSearch()),
     on(openSearch, 'click', () => callbacks.onOpenSearch()),
     on(q(element, '[data-testid="locate"]'), 'click', () => void ctx.actions.locate()),
+    on(areaPickButton, 'click', () => {
+      if (ctx.store.getState().pickingArea) ctx.actions.cancelAreaPick();
+      else ctx.actions.beginAreaPick();
+    }),
     on(q(element, '[data-testid="reset-camera"]'), 'click', () => ctx.actions.resetCamera()),
     on(q(element, '[data-testid="copy-link"]'), 'click', () => void ctx.actions.copyLink()),
     on(q(element, '[data-testid="about-open"]'), 'click', () => callbacks.onOpenAbout())
@@ -105,6 +113,16 @@ export function createTopBar(ctx: UIContext, callbacks: TopBarCallbacks): TopBar
     }
     patcher.attr(cityChip, 'title', title);
     patcher.attr(cityChip, 'aria-label', city ? `City: ${city.name}. Change city` : 'Choose a city');
+
+    const canPick = state.phase === 'ready' && state.model !== null;
+    patcher.disabled(areaPickButton, !canPick);
+    patcher.attr(areaPickButton, 'aria-pressed', state.pickingArea ? 'true' : 'false');
+    patcher.cls(areaPickButton, 'is-active', state.pickingArea);
+    patcher.attr(
+      areaPickButton,
+      'aria-label',
+      state.pickingArea ? 'Cancel choosing an area' : 'Choose area on the map'
+    );
   }
 
   return {

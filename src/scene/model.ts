@@ -48,7 +48,7 @@ export interface PlinthProfile {
   topY: number;
 }
 
-export const DEFAULT_RADIUS_M = 900;
+export const DEFAULT_RADIUS_M = 1500;
 
 function finiteOr(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;

@@ -14,15 +14,17 @@ import type { RawOsmData } from '../../server/city/raw.ts';
 import {
   BRASOV_CITY,
   FIXED_TIMESTAMP,
+  TEST_MODEL_VERSION,
   buildFixtureModel,
+  cityKey,
   fixtureBuildInput,
   loadRawCityFixture
 } from './city-helpers.ts';
 
 test('builds the fixture city with expected feature counts and kinds', async () => {
   const model = await buildFixtureModel();
-  assert.equal(model.v, 1);
-  assert.equal(model.key, 'gn-683844-r900-v1');
+  assert.equal(model.v, TEST_MODEL_VERSION);
+  assert.equal(model.key, cityKey(683844));
   assert.deepEqual(model.city, BRASOV_CITY);
   assert.equal(model.meta.source, 'fixture');
   assert.equal(model.meta.seed, false);

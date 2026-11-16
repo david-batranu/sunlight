@@ -14,12 +14,14 @@
 
 import * as THREE from 'three';
 import type { CityModel, SkyDay } from '../../shared/types.ts';
-import type { SceneDebug, SceneHandle } from '../app/contracts.ts';
+import type { HitFeature, SceneDebug, SceneHandle } from '../app/contracts.ts';
 import {
   CAMERA_DISTANCE_M,
   fitBoxFor,
   fitHalfHeight,
   fitTargetY,
+  groundPointFromRay,
+  ndcFromClient,
   orthoFrustum,
   wrapAzimuth
 } from './camera.ts';
@@ -29,6 +31,11 @@ import {
   shadowRadiusFor,
   type MeshBuffers
 } from './geometry.ts';
+import {
+  hitFeatureForFace,
+  type FeatureKind,
+  type FeatureMeshInfo
+} from './features.ts';
 import {
   createLightSample,
   sampleLightInto,
@@ -160,8 +167,18 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let aspect = 1;
   let viewportHeight = 800;
   let treesMesh: THREE.Mesh | null = null;
+  let buildingsMesh: THREE.Mesh | null = null;
+  let roadsMesh: THREE.Mesh | null = null;
+  let areasMesh: THREE.Mesh | null = null;
   let modelKey: string | null = null;
+  let currentModel: CityModel | null = null;
   let disposed = false;
+
+  /** Raycast targets for feature picking (buildings, roads, areas). */
+  const pickTargets: THREE.Mesh[] = [];
+  const pickInfo = new Map<THREE.Mesh, FeatureMeshInfo>();
+  const raycaster = new THREE.Raycaster();
+  const pointerNdc = new THREE.Vector2();
 
   const sunRig = createRig(sunLight, shadowRadius, extents.maxHeight);
   const moonRig = createRig(moonLight, shadowRadius, extents.maxHeight);
@@ -221,6 +238,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     }
     modelRoot.clear();
     treesMesh = null;
+    buildingsMesh = null;
+    roadsMesh = null;
+    areasMesh = null;
+    pickTargets.length = 0;
+    pickInfo.clear();
   }
 
   /* ---------------------------------------------------------------- */
@@ -375,6 +397,51 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Feature picking                                                   */
+  /* ---------------------------------------------------------------- */
+
+  function registerPickMesh(
+    mesh: THREE.Mesh | null,
+    kind: FeatureKind,
+    buffers: MeshBuffers
+  ): void {
+    if (!mesh || buffers.featureIndices.length === 0) return;
+    pickTargets.push(mesh);
+    pickInfo.set(mesh, { kind, featureIndices: buffers.featureIndices });
+  }
+
+  function hitTest(clientX: number, clientY: number): HitFeature | null {
+    if (disposed || !currentModel || pickTargets.length === 0) return null;
+    const ndc = ndcFromClient(clientX, clientY, canvas.getBoundingClientRect());
+    if (!ndc) return null;
+    pointerNdc.set(ndc[0], ndc[1]);
+    raycaster.setFromCamera(pointerNdc, camera);
+    const intersections = raycaster.intersectObjects(pickTargets, false);
+    if (intersections.length === 0) return null;
+    // Nearest surface wins; an unnamed face blocks fall-through to features behind.
+    const nearest = intersections[0];
+    const info = pickInfo.get(nearest.object as THREE.Mesh) ?? null;
+    return hitFeatureForFace(currentModel, info, nearest.faceIndex);
+  }
+
+  function getGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null {
+    if (disposed) return null;
+    const ndc = ndcFromClient(clientX, clientY, canvas.getBoundingClientRect());
+    if (!ndc) return null;
+    pointerNdc.set(ndc[0], ndc[1]);
+    raycaster.setFromCamera(pointerNdc, camera);
+    const ray = raycaster.ray;
+    return groundPointFromRay(
+      [ray.origin.x, ray.origin.y, ray.origin.z],
+      [ray.direction.x, ray.direction.y, ray.direction.z]
+    );
+  }
+
+  function getCameraAzimuth(): number {
+    return wrapAzimuth(controls.azimuthDeg);
+  }
+
+  /* ---------------------------------------------------------------- */
   /* SceneHandle                                                       */
   /* ---------------------------------------------------------------- */
 
@@ -385,12 +452,16 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     shadowRadius = shadowRadiusFor(extents);
 
     disposeModel();
+    currentModel = model;
     const buffers = buildModelBuffers(model, extents);
     addMesh(buffers.plinth, false, true);
-    addMesh(buffers.buildings, true, true);
-    addMesh(buffers.roads, false, true);
-    addMesh(buffers.areas, false, true);
+    buildingsMesh = addMesh(buffers.buildings, true, true);
+    roadsMesh = addMesh(buffers.roads, false, true);
+    areasMesh = addMesh(buffers.areas, false, true);
     treesMesh = addMesh(buffers.trees, true, true);
+    registerPickMesh(buildingsMesh, 'building', buffers.buildings);
+    registerPickMesh(roadsMesh, 'road', buffers.roads);
+    registerPickMesh(areasMesh, 'area', buffers.areas);
     if (treesMesh) treesMesh.visible = QUALITY[quality].showTrees;
 
     modelKey = model.key;
@@ -481,6 +552,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     canvas.removeEventListener('webglcontextrestored', onContextRestored);
     controls.dispose();
     disposeModel();
+    currentModel = null;
     sunLight.shadow.map?.dispose();
     moonLight.shadow.map?.dispose();
     sunLight.dispose();
@@ -557,6 +629,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     resetCamera,
     resize,
     dispose,
-    getDebug
+    getDebug,
+    hitTest,
+    getCameraAzimuth,
+    getGroundPoint
   };
 }

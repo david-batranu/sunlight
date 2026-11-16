@@ -40,6 +40,34 @@ export const BRASOV_CITY: CityInfo = {
 
 export const FIXED_TIMESTAMP = '2026-01-01T00:00:00.000Z';
 
+/**
+ * Tests pin radius and model version so assertions stay stable when the lead
+ * bumps the production defaults; the builder itself is radius/version agnostic.
+ */
+export const TEST_RADIUS_M = 900;
+export const TEST_MODEL_VERSION = MODEL_VERSION;
+
+export function cityKey(
+  geonameId: number,
+  radiusM = TEST_RADIUS_M,
+  modelVersion = TEST_MODEL_VERSION
+): string {
+  return `gn-${geonameId}-r${radiusM}-v${modelVersion}`;
+}
+
+export function pointKey(
+  lat: number,
+  lon: number,
+  radiusM = TEST_RADIUS_M,
+  modelVersion = TEST_MODEL_VERSION
+): string {
+  const format = (value: number): string => {
+    const fixed = value.toFixed(5);
+    return /^-0(\.0+)?$/.test(fixed) ? fixed.slice(1) : fixed;
+  };
+  return `pt-${format(lat)}_${format(lon)}-r${radiusM}-v${modelVersion}`;
+}
+
 /** Parses the wrapped `raw-city.json` fixture into the pipeline's raw form. */
 export async function loadRawCityFixture(): Promise<RawOsmData> {
   const text = await readFile(path.join(FIXTURES_DIR, 'raw-city.json'), 'utf8');
@@ -57,12 +85,12 @@ export async function loadOsmXmlFixture(): Promise<RawOsmData> {
 
 export function fixtureBuildInput(overrides: Partial<BuildInput> = {}): BuildInput {
   return {
-    key: 'gn-683844-r900-v1',
+    key: cityKey(683844),
     city: BRASOV_CITY,
     centerLat: BRASOV_CITY.lat,
     centerLon: BRASOV_CITY.lon,
-    radiusM: 900,
-    modelVersion: MODEL_VERSION,
+    radiusM: TEST_RADIUS_M,
+    modelVersion: TEST_MODEL_VERSION,
     source: 'fixture',
     seed: false,
     generatedAt: FIXED_TIMESTAMP,
@@ -81,7 +109,7 @@ export function makeMeta(overrides: Partial<ModelMeta> = {}): ModelMeta {
     generatedAt: FIXED_TIMESTAMP,
     source: 'fixture',
     seed: false,
-    radiusM: 900,
+    radiusM: TEST_RADIUS_M,
     stats: { buildings: 1, roads: 1, areas: 0, dropped: 0 },
     warnings: [],
     attribution: OSM_ATTRIBUTION,
@@ -129,6 +157,8 @@ export function makeTestConfig(tmpDir: string, overrides: Partial<AppConfig> = {
     citySource: 'fixture',
     seedsOnly: false,
     generationConcurrency: 1,
+    cityRadiusM: TEST_RADIUS_M,
+    modelVersion: TEST_MODEL_VERSION,
     cacheMaxBytes: 64 * 1024 * 1024,
     ...overrides
   };
@@ -152,7 +182,7 @@ export async function writeSeedDir(dir: string, seeds: SyntheticSeed[]): Promise
   await mkdir(dir, { recursive: true });
   const cities: SeedManifest['cities'] = [];
   for (const seed of seeds) {
-    const key = seed.key ?? `gn-${seed.geonameId}-r900-v${MODEL_VERSION}`;
+    const key = seed.key ?? cityKey(seed.geonameId, 900, MODEL_VERSION);
     const model = makeModel(key, { city: seed.city, meta: { seed: true, source: 'seed' } });
     const gzipped = gzipModelSync(model);
     const file = `${seed.slug}.json.gz`;

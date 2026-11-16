@@ -15,6 +15,7 @@ import {
   ROAD_WIDTH_M,
   areaColorFor,
   buildAreas,
+  emptyBuffers,
   buildBuildings,
   buildModelBuffers,
   buildPlinth,
@@ -177,6 +178,20 @@ test('buildBuildings merges the fixture into one buffer with outward walls', () 
     assert.ok(Number.isFinite(buffers.colors[i]), 'finite colors');
     assert.ok(buffers.colors[i] >= 0 && buffers.colors[i] <= 1, 'linear colors in gamut');
   }
+  assert.equal(buffers.featureIndices.length, buffers.triangles, 'one feature per triangle');
+  // 26 flat + 38 gable buildings: triangles stay contiguous per building.
+  const perBuilding = new Map<number, number>();
+  for (const feature of buffers.featureIndices) {
+    assert.ok(feature >= 0 && feature < 64, `feature ${feature} maps to a building`);
+    perBuilding.set(feature, (perBuilding.get(feature) ?? 0) + 1);
+  }
+  assert.equal(perBuilding.size, 64, 'every fixture building is tagged');
+  let expectedFeature = 0;
+  for (let triangle = 0; triangle < buffers.triangles; triangle += 1) {
+    const feature = buffers.featureIndices[triangle];
+    if (triangle > 0 && feature !== buffers.featureIndices[triangle - 1]) expectedFeature += 1;
+    assert.equal(feature, expectedFeature, 'feature ranges are contiguous');
+  }
   const extents = modelExtentsFor(model);
   for (let i = 0; i < buffers.positions.length; i += 3) {
     assert.ok(buffers.positions[i] >= -extents.halfX * 3, 'x inside model');
@@ -287,6 +302,14 @@ test('buildAreas handles the fixture and skips malformed rings', () => {
   const buffers = buildAreas(model);
   assert.ok(buffers.triangles > 0);
   assert.equal(buffers.positions.length, buffers.triangles * 9);
+  assert.equal(buffers.featureIndices.length, buffers.triangles);
+  const areaCounts = new Map<number, number>();
+  for (const feature of buffers.featureIndices) {
+    areaCounts.set(feature, (areaCounts.get(feature) ?? 0) + 1);
+  }
+  for (let area = 0; area < model.areas.length; area += 1) {
+    assert.ok((areaCounts.get(area) ?? 0) > 0, `area ${area} tagged`);
+  }
   const broken = syntheticModel([]);
   broken.areas = [
     { k: 1, p: [0, 0, 1, 0] },
@@ -299,6 +322,18 @@ test('buildRoads ribbons the fixture and rises above areas', () => {
   const buffers = buildRoads(model);
   // 20 segments × 2 tris + 12 interior joints × 2 tris.
   assert.equal(buffers.triangles, 20 * 2 + 12 * 2);
+  assert.equal(buffers.featureIndices.length, buffers.triangles);
+  // Per-road triangle counts: 4-point roads = 3 segments + 2 joints (10 tris);
+  // 2-point roads = a single segment (2 tris); the rail road has no joints.
+  const expectedRoadTris = [10, 10, 10, 10, 10, 10, 2, 2];
+  const counts = new Map<number, number>();
+  for (const feature of buffers.featureIndices) {
+    counts.set(feature, (counts.get(feature) ?? 0) + 1);
+  }
+  for (let road = 0; road < expectedRoadTris.length; road += 1) {
+    assert.equal(counts.get(road), expectedRoadTris[road], `road ${road} triangles`);
+  }
+  assert.ok(!counts.has(-1), 'every road triangle is tagged');
   const y = buffers.positions[1];
   assert.ok(y > AREA_LIFT_M[4], 'roads draw over areas');
   for (let triangle = 0; triangle < buffers.triangles; triangle += 1) {
@@ -324,6 +359,11 @@ test('buildPlinth makes the stepped diorama base', () => {
     const normal = triangleNormal(buffers.positions, triangle);
     assert.ok(Math.hypot(...normal) > 0, 'no degenerate plinth triangles');
   }
+  assert.equal(buffers.featureIndices.length, buffers.triangles);
+  assert.ok(
+    buffers.featureIndices.every((feature) => feature === -1),
+    'plinth is untagged'
+  );
 });
 
 test('tree sites are deterministic, inside parks/forests and capped', () => {
@@ -348,6 +388,8 @@ test('tree sites are deterministic, inside parks/forests and capped', () => {
   const treeBuffers = buildTrees(first);
   assert.equal(treeBuffers.triangles, first.length * 12);
   assert.equal(treeBuffers.positions.length, treeBuffers.triangles * 9);
+  assert.equal(treeBuffers.featureIndices.length, treeBuffers.triangles);
+  assert.ok(treeBuffers.featureIndices.every((feature) => feature === -1), 'trees untagged');
 });
 
 test('tree placement is capped even across many dense park polygons', () => {
@@ -362,6 +404,19 @@ test('tree placement is capped even across many dense park polygons', () => {
   const sites = sampleTreeSites(dense);
   assert.equal(sites.length, 700, 'hard tree cap');
   assert.equal(buildTrees(sites).triangles, 700 * 12);
+});
+
+test('empty and untagged buffers carry empty feature maps', () => {
+  assert.equal(emptyBuffers().featureIndices.length, 0);
+  const emptyBuildings = buildBuildings(syntheticModel([]));
+  assert.equal(emptyBuildings.triangles, 0);
+  assert.equal(emptyBuildings.featureIndices.length, 0);
+  const emptyRoads = buildRoads(syntheticModel([]));
+  assert.equal(emptyRoads.triangles, 0);
+  assert.equal(emptyRoads.featureIndices.length, 0);
+  const emptyAreas = buildAreas(syntheticModel([]));
+  assert.equal(emptyAreas.triangles, 0);
+  assert.equal(emptyAreas.featureIndices.length, 0);
 });
 
 test('buildModelBuffers returns one buffer per feature class', () => {

@@ -4,13 +4,13 @@
  */
 
 /** Bumped whenever the persisted model schema or generation semantics change. */
-export const MODEL_VERSION = 1;
+export const MODEL_VERSION = 2;
 
 /** Sky payload schema version. */
 export const SKY_VERSION = 1;
 
 /** Half-size of the generated city core, in meters. */
-export const CITY_RADIUS_M = 900;
+export const CITY_RADIUS_M = 1500;
 
 /** Hard cap on generated footprints. */
 export const MAX_BUILDINGS = 20_000;

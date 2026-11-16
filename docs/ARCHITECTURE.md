@@ -65,7 +65,7 @@ resolve target ─► seed key? ─► disk cache? ─► queue/dedupe ─► wo
                                                                │
   parse (XML / Overpass JSON) ─► normalize buildings/roads/water/parks/rail
   ─► relation assembly (multipolygons + holes) ─► project to local metres
-  ─► clip to 1.8 km square ─► RDP simplify ─► infer heights/types
+  ─► clip to 3 km square ─► RDP simplify ─► infer heights/types
   ─► cap 20k buildings ─► quantize decimeters ─► gzip JSON + meta
   ─► atomic cache write ─► job done
 ```
@@ -87,7 +87,8 @@ Provider responses are not persisted between attempts in v1 (a failed generation
 
 ### 4.2 Normalization
 
-- **Buildings**: closed ways and multipolygon relations; outer rings with holes; skip building parts, construction, underground, and `building=no`.
+- **Buildings**: closed ways and multipolygon relations; outer rings with holes; skip building parts, construction, underground, and `building=no`. OSM names/kind tags are sanitized into optional `n`/`k` fields for landmarks (POI-tagged, civic, or ≥25 m; capped deterministically at 1200 per city).
+- **Roads/areas**: named roads and named parks/water/forest/plazas keep their `n` for tooltips.
 - **Roads**: motorway through living street/pedestrian, skipping tunnels; bridges stay at ground level in the diorama; service roads only when named.
 - **Areas**: water, reservoir/riverbank, parks, grass, forest, plazas.
 - **Rail**: surface railway lines rendered as thin tracks.
@@ -96,7 +97,7 @@ Provider responses are not persisted between attempts in v1 (a failed generation
 ### 4.3 Projection and geometry
 
 - Local equirectangular projection around the city centre: `x = (lon − lon0) · cos(lat0)`, `z = −(lat − lat0)` scaled to metres. World axes are +X east, +Y up, −Z north.
-- All geometry is clipped to a square of ±`CITY_RADIUS_M` (default 900 m), simplified with Ramer–Douglas–Peucker (~0.5 m), cleaned, and oriented consistently.
+- All geometry is clipped to a square of ±`CITY_RADIUS_M` (default 1500 m), simplified with Ramer–Douglas–Peucker (~0.5 m), cleaned, and oriented consistently.
 - Coordinates and heights are quantized to integer decimetres to keep the JSON small and deterministic.
 
 ### 4.4 Heights and character
@@ -123,15 +124,15 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 ```json
 {
   "v": 1,
-  "key": "gn-683844-r900-v1",
+  "key": "gn-683844-r1500-v2",
   "city": { "geonameId": 683844, "name": "Brașov", "country": "RO", "lat": 45.64861, "lon": 25.60613, "tz": "Europe/Bucharest" },
-  "meta": { "generatedAt": "...", "source": "overpass", "seed": false, "radiusM": 900,
+  "meta": { "generatedAt": "...", "source": "overpass", "seed": false, "radiusM": 1500,
             "stats": { "buildings": 4812, "roads": 530, "areas": 44, "dropped": 0 },
             "warnings": [], "attribution": "© OpenStreetMap contributors (ODbL 1.0)" },
-  "bounds": { "minX": -900, "maxX": 900, "minZ": -900, "maxZ": 900, "maxHeight": 650 },
-  "buildings": [ { "p": [x,z,...], "h": 128, "t": 0, "r": 1 } ],
-  "roads": [ { "c": 3, "p": [x,z,...] } ],
-  "areas": [ { "k": 1, "p": [x,z,...], "holes": [[x,z,...]] } ]
+  "bounds": { "minX": -15000, "maxX": 15000, "minZ": -15000, "maxZ": 15000, "maxHeight": 675 },
+  "buildings": [ { "p": [x,z,...], "h": 128, "t": 0, "r": 1, "n": "Black Church", "k": "Church" } ],
+  "roads": [ { "c": 3, "p": [x,z,...], "n": "Strada Republicii" } ],
+  "areas": [ { "k": 1, "p": [x,z,...], "holes": [[x,z,...]], "n": "Bârsa River" } ]
 }
 ```
 
@@ -160,11 +161,12 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 
 ## 8. Rendering and lighting
 
-- **Camera**: orthographic, true isometric default (azimuth 45°, pitch 35.264°), fit to the ~1.96 km base. Pan on the ground plane, orbit, zoom, reset; damped and clamped. Sun direction is world-fixed and independent of the camera.
-- **Geometry**: merged vertex-coloured, flat-shaded building mesh; merged road/rail ribbons; earcut-triangulated areas with holes; a warm clay-edged plinth. One draw call per material family, no per-frame allocations.
+- **Camera**: orthographic, true isometric default (azimuth 45°, pitch 35.264°), fit to the ~3.16 km base. Pan on the ground plane, orbit, zoom, reset; damped and clamped. Sun direction is world-fixed and independent of the camera.
+- **Geometry**: merged vertex-coloured, flat-shaded building mesh; merged road/rail ribbons; earcut-triangulated areas with holes; a warm clay-edged plinth. One draw call per material family, no per-frame allocations. A parallel per-triangle feature-index table lets the scene raycast the merged meshes and resolve the named building/road/area under the pointer.
+- **Interaction**: the SPA raycasts on throttled pointer hover and on taps for named-feature tooltips; **Choose area** turns the next click into a new model centre (inverse-projected to WGS84 and generated/cached like any point target); the orientation compass rotates with the camera.
 - **Lights**: sun and moon `DirectionalLight`s + hemisphere ambient. Sun shadows during the day; moon shadows at night under the thresholds above; adaptive orthographic shadow camera for long low-sun shadows; PCFSoft 2048 (1024 low quality).
 - **Palette**: smooth altitude-based interpolation between night / astronomical / nautical / blue hour / golden / day states for background, ambient, fog and light colour. The canvas is transparent over a CSS sky backdrop updated by the UI, so the chrome and the sky always agree.
-- **UI readouts**: sun-path compass with horizon and N/E/S/W, current sun/moon markers, day/night shading, sunrise/sunset ticks, altitude/azimuth, moon phase icon, shadow-length multiplier, timezone offset.
+- **UI readouts**: sun-path compass with horizon and N/E/S/W, current sun/moon markers, day/night shading, sunrise/sunset ticks, altitude/azimuth, moon phase icon, shadow-length multiplier, timezone offset. A separate orientation compass rotates with the camera and doubles as reset-view; hover/tap tooltips identify named buildings, streets, parks and water; **Choose area** recenters the model on a clicked point.
 
 ## 9. HTTP API
 
@@ -195,7 +197,7 @@ Errors are structured (`{error:{code,message,retryable,details?}}`). Request bod
 
 - SPA initial payload target < 300 KB gzipped (Three.js + app).
 - Model seed target ≤ 500 KB gzipped; a 20k-building cap and decimetre quantization keep payloads predictable.
-- Rendering: <25 draw calls and <400k triangles for a normal city; 55–60 fps on an M-series Mac at 1440×900 with 2048 shadows; adaptive DPR/shadow quality on slower devices.
+- Rendering: <25 draw calls and <650k triangles for a normal city; 55–60 fps on an M-series Mac at 1440×900 with 2048 shadows; adaptive DPR/shadow quality on slower devices.
 - Search latency <100 ms server-side; sky computed in milliseconds and cached; model cache hits served as pre-compressed bytes.
 - First generation target under 60 s with Overpass, under ~2 minutes with the tiled OSM fallback; seeds are instant.
 

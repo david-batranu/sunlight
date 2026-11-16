@@ -18,8 +18,8 @@ export const CHROME_PATH =
 export const DESKTOP = { width: 1440, height: 900 };
 export const MOBILE = { width: 390, height: 844 };
 
-export const BRASOV = { geonameId: 683844, name: 'Brașov', key: 'gn-683844-r900-v1' };
-export const CLUJ = { geonameId: 681290, name: 'Cluj-Napoca', key: 'gn-681290-r900-v1' };
+export const BRASOV = { geonameId: 683844, name: 'Brașov', key: 'gn-683844-r1500-v2' };
+export const CLUJ = { geonameId: 681290, name: 'Cluj-Napoca', key: 'gn-681290-r1500-v2' };
 /** Brașov city centre (GeoNames) for the geolocation stub. */
 export const BRASOV_COORDS = { latitude: 45.64861, longitude: 25.60613 };
 
@@ -108,6 +108,14 @@ export async function readState(page) {
       notices: state.notices.slice(),
       current: state.current,
       modelKey: state.model?.key ?? null,
+      radiusM: state.model?.meta?.radiusM ?? null,
+      stats: state.model?.meta?.stats ?? null,
+      namedBuildings: state.model?.buildings?.filter((building) => !!building.n).length ?? 0,
+      namedRoads: state.model?.roads?.filter((road) => !!road.n).length ?? 0,
+      namedAreas: state.model?.areas?.filter((area) => !!area.n).length ?? 0,
+      cameraAzimuthDeg: state.cameraAzimuthDeg,
+      hover: state.hover ? { name: state.hover.feature.name, kind: state.hover.feature.kind, sticky: state.hover.sticky } : null,
+      pickingArea: state.pickingArea,
       sky: state.sky
         ? {
             sun: state.sky.sun,

@@ -17,6 +17,8 @@ import { sha256Hex } from '../../server/city/model-io.ts';
 import {
   FIXED_TIMESTAMP,
   REPO_ROOT,
+  TEST_MODEL_VERSION,
+  cityKey,
   makeTempDir,
   makeTestConfig,
   removeTempDir
@@ -58,6 +60,8 @@ test('fixture bake writes a verifiable manifest and gzipped seed model', async (
       outDir,
       '--only',
       'brasov',
+      '--radius',
+      '900',
       '--generated-at',
       FIXED_TIMESTAMP
     ]);
@@ -68,7 +72,7 @@ test('fixture bake writes a verifiable manifest and gzipped seed model', async (
 
     const manifest = JSON.parse(await readFile(path.join(outDir, 'manifest.json'), 'utf8')) as SeedManifest;
     assert.equal(manifest.v, 1);
-    assert.equal(manifest.modelVersion, 1);
+    assert.equal(manifest.modelVersion, TEST_MODEL_VERSION);
     assert.equal(manifest.radiusM, 900);
     assert.equal(manifest.generatedAt, FIXED_TIMESTAMP);
     assert.equal(manifest.cities.length, 1);
@@ -76,9 +80,9 @@ test('fixture bake writes a verifiable manifest and gzipped seed model', async (
     assert.equal(entry.slug, 'brasov');
     assert.equal(entry.geonameId, 683844);
     assert.equal(entry.name, 'Brașov');
-    assert.equal(entry.key, 'gn-683844-r900-v1');
+    assert.equal(entry.key, cityKey(683844));
     assert.equal(entry.file, 'brasov.json.gz');
-    assert.equal(entry.modelVersion, 1);
+    assert.equal(entry.modelVersion, TEST_MODEL_VERSION);
     assert.equal(entry.radiusM, 900);
     assert.equal(entry.source, 'fixture');
 
@@ -86,8 +90,8 @@ test('fixture bake writes a verifiable manifest and gzipped seed model', async (
     assert.equal(gzipped.length, entry.bytes);
     assert.equal(sha256Hex(gzipped), entry.sha256);
     const model = JSON.parse(gunzipSync(gzipped).toString('utf8'));
-    assert.equal(model.v, 1);
-    assert.equal(model.key, 'gn-683844-r900-v1');
+    assert.equal(model.v, TEST_MODEL_VERSION);
+    assert.equal(model.key, cityKey(683844));
     assert.equal(model.meta.seed, true);
     assert.equal(model.meta.source, 'seed');
     assert.equal(model.meta.generatedAt, FIXED_TIMESTAMP);
@@ -122,7 +126,16 @@ test('fixture bakes are byte-deterministic for the same generatedAt', async () =
   try {
     const outA = path.join(dir, 'a');
     const outB = path.join(dir, 'b');
-    const args = ['--source', 'fixture', '--only', 'brasov,cluj-napoca', '--generated-at', FIXED_TIMESTAMP];
+    const args = [
+      '--source',
+      'fixture',
+      '--only',
+      'brasov,cluj-napoca',
+      '--radius',
+      '900',
+      '--generated-at',
+      FIXED_TIMESTAMP
+    ];
     await runBake([...args, '--out', outA]);
     await runBake([...args, '--out', outB]);
 
@@ -151,6 +164,8 @@ test('re-baking reuses an up-to-date seed without fetching', async () => {
       outDir,
       '--only',
       'brasov',
+      '--radius',
+      '900',
       '--generated-at',
       FIXED_TIMESTAMP
     ];

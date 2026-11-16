@@ -34,7 +34,9 @@ const PATHS = {
     '<circle cx="12" cy="12" r="8.6"/><path d="M3.6 12h16.8M12 3.4c2.4 2.5 3.6 5.4 3.6 8.6S14.4 18.1 12 20.6c-2.4-2.5-3.6-5.4-3.6-8.6S9.6 5.9 12 3.4Z"/>',
   warning: '<path d="M12 3.6 21 19.4H3l9-15.8Z"/><path d="M12 9.4v4.4"/><circle cx="12" cy="16.6" r=".9" fill="currentColor" stroke="none"/>',
   seed: '<path d="M12 20.4c0-4.8 3.4-8.4 8-8.4 0 4.8-3.4 8.4-8 8.4Z"/><path d="M12 20.4C12 15.6 8.6 12 4 12c0 4.8 3.4 8.4 8 8.4Z"/><path d="M12 20.4V9.4"/>',
-  location: '<path d="M12 21s6.4-5.4 6.4-10.2a6.4 6.4 0 1 0-12.8 0C5.6 15.6 12 21 12 21Z"/>'
+  location: '<path d="M12 21s6.4-5.4 6.4-10.2a6.4 6.4 0 1 0-12.8 0C5.6 15.6 12 21 12 21Z"/>',
+  areaPick:
+    '<path d="M4.2 8V5.6a1.4 1.4 0 0 1 1.4-1.4H8M16 4.2h2.4a1.4 1.4 0 0 1 1.4 1.4V8M19.8 16v2.4a1.4 1.4 0 0 1-1.4 1.4H16M8 19.8H5.6a1.4 1.4 0 0 1-1.4-1.4V16"/><circle cx="12" cy="12" r="2.7"/><path d="M12 6.6v1.4M12 16v1.4M6.6 12H8M16 12h1.4"/>'
 } as const;
 
 export type IconName = keyof typeof PATHS;

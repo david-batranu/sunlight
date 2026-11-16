@@ -45,11 +45,22 @@ export const MAX_TREES = 700;
 export interface MeshBuffers {
   positions: Float32Array;
   colors: Float32Array;
+  /**
+   * One entry per triangle: index of the source record in the model array
+   * (buildings / roads / areas), or -1 for untagged geometry (plinth, trees).
+   * Raycast `faceIndex` indexes straight into this array.
+   */
+  featureIndices: Int32Array;
   triangles: number;
 }
 
 export function emptyBuffers(): MeshBuffers {
-  return { positions: new Float32Array(0), colors: new Float32Array(0), triangles: 0 };
+  return {
+    positions: new Float32Array(0),
+    colors: new Float32Array(0),
+    featureIndices: new Int32Array(0),
+    triangles: 0
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,16 +181,25 @@ export function mulberry32(seed: number): () => number {
 class MeshBuilder {
   private positions: Float32Array;
   private colors: Float32Array;
+  private features: Int32Array;
   private length = 0;
+  private featuresWritten = 0;
+  private feature = -1;
 
   constructor(initialFloats = 4096) {
     const capacity = Math.max(initialFloats, 96);
     this.positions = new Float32Array(capacity);
     this.colors = new Float32Array(capacity);
+    this.features = new Int32Array(Math.ceil(capacity / 9));
   }
 
   get triangleCount(): number {
-    return this.length / 9;
+    return this.featuresWritten;
+  }
+
+  /** Tags every triangle emitted from now on with a source-record index. */
+  setFeature(index: number): void {
+    this.feature = Number.isFinite(index) ? index | 0 : -1;
   }
 
   private reserve(extraFloats: number): void {
@@ -193,6 +213,19 @@ class MeshBuilder {
     const colors = new Float32Array(capacity);
     colors.set(this.colors);
     this.colors = colors;
+    const featureCapacity = Math.ceil(capacity / 9);
+    if (featureCapacity > this.features.length) {
+      const features = new Int32Array(featureCapacity);
+      features.set(this.features.subarray(0, this.featuresWritten));
+      this.features = features;
+    }
+  }
+
+  private pushFeature(): void {
+    const triangleIndex = this.featuresWritten;
+    if (triangleIndex >= this.features.length) this.reserve(9);
+    this.features[triangleIndex] = this.feature;
+    this.featuresWritten += 1;
   }
 
   private vertex(x: number, y: number, z: number, color: RGB): void {
@@ -233,6 +266,7 @@ class MeshBuilder {
       this.vertex(cx, cy, cz, color);
       this.vertex(bx, by, bz, color);
     }
+    this.pushFeature();
   }
 
   /**
@@ -275,6 +309,8 @@ class MeshBuilder {
       push(dx, dy, dz, topColor);
       push(cx, cy, cz, topColor);
     }
+    this.pushFeature(); // t1
+    this.pushFeature(); // t2
   }
 
   /** Horizontal triangle at height y, normal up, robust to input winding. */
@@ -297,6 +333,7 @@ class MeshBuilder {
       this.vertex(x2, y, z2, color);
       this.vertex(x1, y, z1, color);
     }
+    this.pushFeature();
   }
 
   finish(): MeshBuffers {
@@ -304,7 +341,8 @@ class MeshBuilder {
     return {
       positions: this.positions.slice(0, this.length),
       colors: this.colors.slice(0, this.length),
-      triangles: this.length / 9
+      featureIndices: this.features.slice(0, this.featuresWritten),
+      triangles: this.featuresWritten
     };
   }
 }
@@ -452,6 +490,7 @@ export function buildBuildings(model: CityModel): MeshBuffers {
   const flat: number[] = [];
   const buildings = model.buildings ?? [];
   for (let index = 0; index < buildings.length; index += 1) {
+    builder.setFeature(index);
     const building = buildings[index];
     const count = loadRing2D(building.p, ring);
     if (count < 3) continue;
@@ -531,6 +570,7 @@ export function buildRoads(model: CityModel): MeshBuffers {
   const ring: Ring2D = { xs: [], zs: [] };
   const roads = model.roads ?? [];
   for (let index = 0; index < roads.length; index += 1) {
+    builder.setFeature(index);
     const road = roads[index];
     const count = loadRing2D(road.p, ring);
     if (count < 2) continue;
@@ -591,6 +631,7 @@ export function buildAreas(model: CityModel): MeshBuffers {
   const holeIndices: number[] = [];
   const areas = model.areas ?? [];
   for (let index = 0; index < areas.length; index += 1) {
+    builder.setFeature(index);
     const area = areas[index];
     flat.length = 0;
     holeIndices.length = 0;

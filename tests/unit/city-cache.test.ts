@@ -11,6 +11,8 @@ import { ModelCache } from '../../server/city/model-cache.ts';
 import { sha256Hex } from '../../server/city/model-io.ts';
 import {
   BRASOV_CITY,
+  TEST_MODEL_VERSION,
+  cityKey,
   gzipModelSync,
   makeMeta,
   makeModel,
@@ -18,7 +20,7 @@ import {
   removeTempDir
 } from './city-helpers.ts';
 
-const KEY = 'gn-683844-r900-v1';
+const KEY = cityKey(683844);
 const TARGET = { kind: 'city' as const, geonameId: 683844 };
 
 function writeInfo(metaSeed = false) {

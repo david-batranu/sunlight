@@ -31,6 +31,7 @@ import {
   wrapAzimuth
 } from '../../src/scene/camera.ts';
 import {
+  DEFAULT_RADIUS_M,
   defaultExtents,
   modelExtentsFor,
   plinthProfile
@@ -160,9 +161,12 @@ test('fitHalfHeight frames the whole diorama at every aspect ratio', () => {
   const wide = fitHalfHeight({ centerX: 0, centerZ: 0, ...box }, 2.2);
   assert.ok(narrow > wide, `portrait ${narrow} should exceed landscape ${wide}`);
 
-  // The default 1.96 km diorama should frame to roughly 1 km of half-height.
+  // The fitted half-height tracks the fallback diorama size (DEFAULT_RADIUS_M).
   const landscape = fitHalfHeight({ centerX: 0, centerZ: 0, ...box }, 16 / 9);
-  assert.ok(landscape > 800 && landscape < 1300, `sanity fit ${landscape}`);
+  assert.ok(
+    landscape > DEFAULT_RADIUS_M * 0.8 && landscape < DEFAULT_RADIUS_M * 1.6,
+    `sanity fit ${landscape} for radius ${DEFAULT_RADIUS_M}`
+  );
 });
 
 test('modelExtentsFor unions bounds with actual fixture geometry', () => {
@@ -191,12 +195,15 @@ test('modelExtentsFor unions bounds with actual fixture geometry', () => {
 
 test('defaultExtents are a sane pre-model fallback', () => {
   const extents = defaultExtents();
-  assert.equal(extents.radius, 900);
+  assert.equal(extents.radius, DEFAULT_RADIUS_M);
   assert.ok(extents.maxHeight > 60);
   assert.ok(extents.minY < 0);
   const profile = plinthProfile(extents);
-  assert.ok(profile.outerHalfX > 900);
-  assert.ok(profile.outerHalfX < 1050, `plinth should stay compact, got ${profile.outerHalfX}`);
+  assert.ok(profile.outerHalfX > DEFAULT_RADIUS_M);
+  assert.ok(
+    profile.outerHalfX < DEFAULT_RADIUS_M * 1.2,
+    `plinth should stay compact, got ${profile.outerHalfX}`
+  );
 });
 
 test('fitTargetY centres the plinth vertically', () => {

@@ -337,7 +337,21 @@ async function main() {
     }
   }
 
-  const cities = SEED_CITIES.filter((city) => results.has(city.slug)).map((city) => results.get(city.slug));
+  // Keep valid seeds for cities that were not selected by --only (and preserve
+  // a failed city's previous bake), so a partial run never shrinks the manifest.
+  const cities = [];
+  for (const city of SEED_CITIES) {
+    const entry = results.get(city.slug);
+    if (entry) {
+      cities.push(entry);
+      continue;
+    }
+    if (!options.only) continue;
+    const previous = previousBySlug.get(city.slug);
+    if (previous && (await existingSeedIsValid(outDir, previous, modelVersion, radiusM))) {
+      cities.push(previous);
+    }
+  }
   const manifest = {
     v: MANIFEST_FORMAT,
     modelVersion,

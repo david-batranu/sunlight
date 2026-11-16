@@ -65,3 +65,23 @@ test('only the sun and moon may cast shadows (no extra shadow lights)', () => {
   assert.ok(!scene.source.includes('new THREE.PointLight'));
   assert.ok(!scene.source.includes('new THREE.SpotLight'));
 });
+
+test('scene implements the picking contract without painting the canvas', () => {
+  const scene = sceneSources().find((file) => file.name === 'scene.ts');
+  assert.ok(scene);
+  for (const method of ['hitTest', 'getCameraAzimuth', 'getGroundPoint']) {
+    assert.ok(
+      new RegExp(`function ${method}\\(|${method}:`).test(scene.source),
+      `scene.ts must implement ${method}`
+    );
+  }
+  // The pickable meshes and their per-triangle feature tables are registered
+  // when a model is built, and cleared again on dispose.
+  assert.ok(scene.source.includes('registerPickMesh'), 'buildings/roads/areas registered');
+  assert.ok(scene.source.includes('pickTargets'), 'raycast targets stored');
+  assert.ok(scene.source.includes('pickInfo'), 'feature tables stored');
+  assert.ok(scene.source.includes('hitFeatureForFace'), 'face → record resolution wired');
+  // Raycast NDC + ground helpers come from the pure camera module.
+  assert.ok(scene.source.includes('ndcFromClient'));
+  assert.ok(scene.source.includes('groundPointFromRay'));
+});

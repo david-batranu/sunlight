@@ -12,6 +12,7 @@ import { MODEL_VERSION } from '../../shared/constants.ts';
 import type { CityInfo } from '../../shared/types.ts';
 import {
   BRASOV_CITY,
+  cityKey,
   makeTempDir,
   removeTempDir,
   writeSeedDir
@@ -45,7 +46,7 @@ test('loads a valid manifest and serves seed models', async () => {
     assert.equal(store.statusValue, 'up');
     assert.deepEqual(store.warningList, []);
     assert.equal(store.byGeonameId(683844)?.slug, 'brasov');
-    assert.equal(store.byKey('gn-683506-r900-v1')?.slug, 'bucharest');
+    assert.equal(store.byKey(cityKey(683506))?.slug, 'bucharest');
     assert.equal(store.byGeonameId(1), null);
 
     const entry = store.byGeonameId(683844);

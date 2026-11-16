@@ -18,8 +18,10 @@ import type { JobStatus } from '../../shared/types.ts';
 import {
   BRASOV_CITY,
   FIXED_TIMESTAMP,
+  cityKey,
   makeTempDir,
   makeTestConfig,
+  pointKey,
   removeTempDir,
   writeSeedDir
 } from './city-helpers.ts';
@@ -69,7 +71,7 @@ test('search/resolve are unavailable before init and health is safe', async () =
     assert.deepEqual(health.seeds, { count: 0, slugs: [] });
     assert.equal(service.getJob('nope'), null);
     assert.equal(service.cancelJob('nope'), false);
-    assert.equal(await service.readModel('gn-683844-r900-v1'), null);
+    assert.equal(await service.readModel(cityKey(683844)), null);
     await service.shutdown();
     await service.shutdown(); // idempotent
   } finally {
@@ -101,14 +103,14 @@ test('search, nearest and resolve work against the bundled index', async () => {
     );
 
     const resolved = service.resolve({ kind: 'city', geonameId: 683844 });
-    assert.equal(resolved.key, 'gn-683844-r900-v1');
+    assert.equal(resolved.key, cityKey(683844));
     assert.deepEqual(resolved.target, { kind: 'city', geonameId: 683844 });
     assert.equal(resolved.city.geonameId, 683844);
     assert.equal(resolved.city.tz, 'Europe/Bucharest');
     assert.equal(resolved.seedSlug, null);
 
     const point = service.resolve({ kind: 'point', lat: 45.65, lon: 25.6 });
-    assert.equal(point.key, 'pt-45.65000_25.60000-r900-v1');
+    assert.equal(point.key, pointKey(45.65, 25.6));
     assert.equal(point.city.geonameId, null);
     assert.equal(point.city.country, 'RO');
     assert.equal(point.city.tz, 'Europe/Bucharest');
@@ -169,7 +171,7 @@ test('generates a city model end to end with fixture provider and worker', async
     assert.ok(status);
     assert.equal(status.state, 'done', JSON.stringify(status));
     assert.equal(status.progress.percent, 100);
-    assert.equal(status.modelUrl, '/api/models/gn-683844-r900-v1');
+    assert.equal(status.modelUrl, `/api/models/${cityKey(683844)}`);
     for (let i = 1; i < percents.length; i += 1) {
       assert.ok(percents[i] >= percents[i - 1], `progress must be monotonic: ${percents.join(',')}`);
     }
@@ -222,7 +224,7 @@ test('generates arbitrary point models near a city', async () => {
   await withService({}, async (service) => {
     const point = { kind: 'point' as const, lat: 45.66, lon: 25.62 };
     const resolved = service.resolve(point);
-    assert.match(resolved.key, /^pt-45\.66000_25\.62000-r900-v1$/);
+    assert.equal(resolved.key, pointKey(45.66, 25.62));
     const ensured = await service.ensureModel(point);
     assert.equal(ensured.state, 'queued');
     if (ensured.state !== 'queued') return;
@@ -295,7 +297,7 @@ test('seeds-only mode still serves previously generated cache entries', async ()
   try {
     const fixtureService = createCityService(makeTestConfig(dir));
     await fixtureService.init();
-    const key = 'gn-683844-r900-v1';
+    const key = cityKey(683844);
     try {
       const ensured = await fixtureService.ensureModel({ kind: 'city', geonameId: 683844 });
       assert.equal(ensured.state, 'queued');
@@ -348,7 +350,7 @@ test('cancelJob handles unknown and active jobs', async () => {
       const status = await waitForJob(service, ensured.jobId);
       assert.ok(status.state === 'done' || status.state === 'error');
     }
-    assert.equal(await service.readModel('gn-683844-r900-v1').then((model) => model !== null), true);
+    assert.equal(await service.readModel(cityKey(683844)).then((model) => model !== null), true);
   });
 });
 
@@ -357,7 +359,7 @@ test('init is idempotent and model version is embedded in keys', async () => {
     await service.init();
     const resolved = service.resolve({ kind: 'city', geonameId: 683844 });
     assert.ok(resolved.key.endsWith(`-v${MODEL_VERSION}`));
-    assert.equal(resolved.key, `gn-683844-r900-v${MODEL_VERSION}`);
+    assert.equal(resolved.key, cityKey(683844));
     assert.equal(service.health().cache.maxBytes, 64 * 1024 * 1024);
   });
 });

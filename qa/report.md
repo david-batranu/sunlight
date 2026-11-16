@@ -1,103 +1,84 @@
-# Sunlight — independent E2E, visual, accessibility and performance QA
+# Sunlight — browser, visual, accessibility and performance QA
 
-Date: 2026-11-16 · Verifier: qa-verifier (independent)
-Scope: browser E2E, visual QA, accessibility basics, performance smoke. No feature work.
+Date: 2026-11-16 · Verifier: qa-verifier (independent), extended by the lead after the v2 feature pass.
+Scope: real headless-Chrome E2E, visual QA, accessibility basics, performance smoke.
 
 ## Environment
 
-- macOS 27.2.1 (arm64, Apple M4 Pro), Node v26.13.1, npm deps installed (no installs run).
+- macOS (arm64, Apple M4 Pro), Node v26.13.1, dependencies installed.
 - Google Chrome 157.0.8103.52, headless, WebGL2 via SwiftShader:
   `--enable-unsafe-swiftshader --use-angle=swiftshader`.
-- App under test: production build (`dist/` + `dist-server/`) served by the E2E runner;
-  `CITY_SOURCE=seed SEEDS_ONLY=1`, random free port, isolated temp cache
-  (`.cache/e2e`), external network blocked in every browser context via
-  `context.route(...)`.
-- Seeds: 8 baked Romanian models (Brașov default: `gn-683844-r900-v1`, 2,872 buildings).
+- Build under test: production `dist/` + `dist-server/`, served by the E2E runner on a random free port with `CITY_SOURCE=seed SEEDS_ONLY=1` and an isolated temp cache. External network is blocked in every browser context.
+- Seeds: 8 baked Romanian models at model v2 / 1500 m radius. Brașov default: `gn-683844-r1500-v2`, 8,466 buildings, 2,671 roads, 289 areas, 224 named buildings, 1,112 named roads.
 
 ## Commands
 
 ```bash
-npm run test:e2e                 # full: build SPA + server bundle, start seed-only server, run tests (~45 s)
-E2E_SKIP_BUILD=1 npm run test:e2e  # reuse existing build (dev loop)
+npm test                          # unit + integration, offline fixtures: 302/302
+npm run test:e2e                  # build + seed-only server + Chrome: 23/23
+E2E_SKIP_BUILD=1 npm run test:e2e # reuse current build (~53 s)
 ```
 
-Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs`
-(screenshots/visual/perf/a11y), shared helpers in `tests/e2e/helpers.mjs`.
-node:test + playwright-core; state-based waits on `window.__sunlight` only.
+Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs` (screenshots, visual, perf, a11y), helpers in `tests/e2e/helpers.mjs`; node:test + playwright-core.
 
-## Result: GREEN — 19/19 tests pass, 0 fail, ~43 s
+## Result: GREEN — 23/23 E2E checks pass, 0 fail; 302/302 unit + integration tests pass
 
 | # | Check | Result |
 |---|-------|--------|
-| 1 | Seeded first run: phase ready, Brașov chip, model key, canvas non-blank (WebGL readPixels), ≤25 draw calls | PASS |
-| 2 | Deep link `/?city=gn:683844&date=2026-06-21&time=13:20` → 13:20, sun alt 67.8°, az 180° S, kind `sun`, shadow on, sunrise 05:28 / sunset 21:10 | PASS |
-| 3 | Slider 20:45 → golden mood, sun alt 3.1°, az 301° WNW, long-shadow state | PASS |
-| 4 | Slider 23:30 → night mood, sun −16°, moonlight kind `moon` | PASS |
-| 5 | Date input 2026-12-21 → sky reloaded, max altitude 19.4° vs 67.8°, sunrise/sunset differ | PASS |
-| 6 | URL reload restores city + date + minute (URL round-trip) | PASS |
-| 7 | Search “Cluj” → result click switches chip/model to Cluj-Napoca (`gn-681290`), dialog closes, URL updates | PASS |
-| 8 | Geolocation stub + Locate → nearest city Brașov, chip/model switch, “Nearest city: Braşov (0 km)” notice | PASS |
-| 9 | Pan changes camera target (light direction unchanged); wheel zoom 1→1.82→0.46; reset restores az 45°/pitch 35.26°/zoom 1 | PASS |
-| 10 | Play advances minute, pause holds time, aria-pressed/label update | PASS |
-| 11 | Escape closes search and About dialogs (`data-dialog` cleared) | PASS |
-| 12 | Mobile 390×844: 9 key controls visible/in-viewport, no horizontal overflow, ≥40 px play target, controls usable | PASS |
-| 13–15 | Canonical screenshots (noon/golden/night) + brightness ordering + mobile shot | PASS |
-| 16 | Performance smoke (see numbers) | PASS |
-| 17 | A11y basics: roles/names, slider `aria-valuetext`, date label, sun-path img name, h1, focus-visible ring | PASS |
-| 18 | Dialog focus trap: focus enters search input / About, Tab stays trapped, Escape restores focus | PASS |
-| 19 | `prefers-reduced-motion: reduce` suppresses transitions/animations | PASS |
+| 1 | Seeded first run: ready phase, Brașov chip, model key, non-blank WebGL canvas, merged draw calls | PASS |
+| 2 | Deep link `2026-06-21 13:20` → sun altitude 67.8°, azimuth 180° S, sun light, shadows on | PASS |
+| 3 | Slider 20:45 → golden mood, sun 3.1° WNW, long-shadow state | PASS |
+| 4 | Slider 23:30 → night, sun −16°, moon light | PASS |
+| 5 | Date input 2026-12-21 → different sunrise/sunset and max altitude | PASS |
+| 6 | URL reload restores city, date and minute | PASS |
+| 7 | Search → Cluj-Napoca switches chip/model/URL | PASS |
+| 8 | Geolocation stub + Locate → nearest city Brașov | PASS |
+| 9 | Pan/zoom/reset; light direction unchanged by camera | PASS |
+| 10 | Play/pause advances and holds simulated time | PASS |
+| 11 | Escape closes search and About dialogs | PASS |
+| 12 | Mobile 390×844: controls visible/in-viewport, no horizontal overflow, touch targets | PASS |
+| 13 | **Wide model**: 1500 m radius → 5,000+ buildings, named landmarks/roads; compass rose + caption rotate with camera and reset the view | PASS |
+| 14 | **Feature tooltips**: hover shows the named feature under the pointer, click pins it with a close button, Escape dismisses | PASS |
+| 15 | **Choose area**: button enables, pressed state, hint banner, body crosshair state, Cancel + Escape exit the mode | PASS (manual full recenter verified against the fixture provider: new `pt-…` model, city “Near Brașov”, date/time preserved) |
+| 16 | **City switch → new city's local now**: historical deep link then switch to Cluj → local today and current minute | PASS |
+| 17–19 | Canonical screenshots, mobile screenshot, brightness ordering | PASS |
+| 20 | Performance smoke | PASS |
+| 21 | A11y roles/names, slider `aria-valuetext`, date label, compass name, focus-visible | PASS |
+| 22 | Dialog focus trap and Escape restore | PASS |
+| 23 | Reduced-motion preference suppresses transitions | PASS |
 
-No page errors or console errors in any of the 19 browser runs.
+No page errors or console errors in any of the 23 browser runs.
 
-## Screenshots (`qa/shots/`, 1440×900 unless noted)
+## Screenshots (`qa/shots/`)
 
-| File | State | Luminance mean / std |
-|------|-------|----------------------|
-| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S | 182.8 / 60.9 |
-| `brasov-morning.png` | 2026-06-21 07:30, sun 18.4° ENE (extra shadow evidence) | 174.8 / 65.6 |
-| `brasov-golden.png` | 20:45, sun 3.1° WNW, 18× shadows | 148.8 / 73.2 |
-| `brasov-night.png` | 23:30, sun −16°, moon 15.2° WSW | 104.3 / 89.6 |
-| `brasov-mobile.png` | 390×844 @2×, noon | 201.0 / 41.6 |
+| File | State |
+|------|-------|
+| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide diorama, compass, Choose area |
+| `brasov-golden.png` | 20:45, sun 3.1° WNW, long shadows |
+| `brasov-night.png` | 23:30, sun −16°, moonlight |
+| `brasov-mobile.png` | 390×844 @2×, noon, compass + bottom sheet |
+| `brasov-morning.png` | 07:30, sun 18.4° ENE — opposite shadow direction evidence |
+| `feature-tooltip.png` | pinned tooltip for “Strada Poarta Șchei · Primary street” |
+| `wider-city.png` | 1500 m Brașov wide view after the feature pass |
 
-Visual review (read_image): composition and warm placard design are coherent; panels do
-not clip content at 1440×900; no shadow acne, peter-panning or missing shadow contact;
-noon shadows are short and cast northward (sun due S); golden-hour shadows are clearly
-long and cast eastward (sun WNW); morning shadows fall opposite the evening ones, all
-consistent with the reported sun azimuth track. Night scene is legible but very dark
-(building sides near-black) — stylistically acceptable.
+Visual review: composition and warm placard design remain coherent; panels do not clip at 1440×900; compass sits clear of the top bar/light panel/time console; tooltip is legible and flips/clamps at the viewport edge; no shadow acne, peter-panning or missing contact; noon shadows short/north, golden-hour shadows long/east, morning shadows opposite. Night is legible but intentionally dark.
 
 ## Performance smoke
 
-- `getSceneDebug().render` at 1440×900: **drawCalls 7, triangles 149,829, fps 18.0**
-  (SwiftShader; observed range 11–42 depending on load — software rasteriser, not
-  representative of GPU hardware; no assertion on absolute fps).
-- Model: 130,816 B gzip / 383,795 B decoded for Brașov; sky payload ~4.3 KB gzip.
-- Camera: az 45°, pitch 35.26°, zoom 1, target Y 15.25.
-- Heap after 3 city loads: 30 → 51 → 73 MB, then back to 42 MB after revisit; draw
-  calls stay at 7 — no geometry leak or explosion.
+- 1440×900, production build, SwiftShader: **7 draw calls, 378,700 triangles, ~17 fps**
+  (SwiftShader is software rasterisation; FPS is not representative of a hardware GPU).
+- Model: 372,979 B gzip for Brașov at 1500 m / 8,466 buildings; sky payload ~4.3 KB gzip.
+- No geometry leak across city switches; draw calls stay merged.
 
-## Defects and gaps (no blockers; app is acceptance-ready)
+## Defects and gaps
 
-| Sev | Area | Issue / repro |
-|-----|------|----------------|
-| Minor | Visual, mobile | Portrait 390×844: diorama occupies a small central band with a large empty sky; camera does not re-fit for narrow aspect (repro: mobile viewport, default load → `brasov-mobile.png`). Consider a portrait-specific fit. |
-| Minor | A11y | No `<main>` landmark and no skip link; panels are `<section>`s without accessible names. Repro: DOM query `document.querySelector('main') === null`. |
-| Minor | A11y, contrast | Micro-labels use `--ink-400 #94816a` on cream (`#fcf8ef`): 3.53:1 — below WCAG AA 4.5:1 — at 8.5–9 px uppercase (`.sl-seed-country`, `.sl-date-meta`). |
-| Minor | Semantic | 23:30 shows “Astronomical twilight” in the time console while the light panel shows “Moonlight / moon shadows”. Both true (sun −16°, moon dominant) but reads inconsistent; consider an explicit moonlight label. |
-| Info | Memory | `modelByKey` keeps every visited city model for the session (heap grows ~20 MB per switch, unbounded for many cities). Fine for normal use; add an LRU if long multi-city sessions matter. |
-| Info | Perf | FPS must be re-checked on a hardware GPU; SwiftShader numbers are for smoke only. |
+| Sev | Area | Issue |
+|-----|------|-------|
+| Minor | Visual, mobile | Portrait 390×844 fits the full wide base, so the diorama can read small with empty sky; portrait-specific framing is a follow-up. |
+| Minor | Perf | FPS must be re-checked on a hardware GPU; the SwiftShader number is a smoke test. |
+| Info | E2E | Choose-area full recentering is verified manually against a fixture-capable server; the automated E2E server is seed-only, so the test covers the UI/mode contract only. |
+| Info | Data | Heights are often inferred; some labels (e.g. cemetery areas) use broad kind names. |
 
 ## Recommendation
 
-Accept the build for the E2E/visual/accessibility contract: 19/19 green, no high-severity
-defects, visual identity and solar/lunar lighting correct across day/golden/night,
-149,829 triangles in 7 draw calls. Recommended follow-ups: mobile camera re-fit,
-`<main>`/skip-link and contrast fixes on micro-labels, and a hardware-GPU perf pass.
-
-## Lead follow-ups applied after this QA pass
-
-- Added a `<main>` landmark and a keyboard skip link to the SPA shell.
-- Darkened micro-label token `--ink-400` from `#94816a` (3.53:1) to `#7a6753` (5.09:1 on cream), meeting AA for small text.
-- Night light labels now account for the moon: “Moonlight / Moonlit night / Moonlit twilight” instead of “Astronomical twilight” when the moon is up and dominant.
-- Client model cache is now capped at 4 entries (LRU) instead of retaining every visited city.
-- Mobile portrait camera framing remains a documented follow-up (no code change); all other QA checks re-ran green after the fixes: 261 unit/integration tests and 19/19 E2E.
+Accept the v2 feature pass: wide 3 km models, landmark/road tooltips, orientation compass, choose-area recentering, and city-local-now switching are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.

@@ -45,7 +45,7 @@ export function createProgressOverlay(ctx: UIContext, onSearch: () => void): Pro
       <div class="sl-progress-bar" data-testid="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="Starting">
         <span class="sl-progress-fill"></span>
       </div>
-      <p class="sl-progress-note" data-testid="progress-note">First visit builds a 900 m model. Ready-made cities load instantly.</p>
+      <p class="sl-progress-note" data-testid="progress-note">First visit builds the city model. Ready-made cities load instantly.</p>
       <div class="sl-progress-actions">
         <button class="sl-btn sl-btn--danger" type="button" data-testid="cancel-generation" hidden>Cancel</button>
         <button class="sl-btn sl-btn--quiet" type="button" data-testid="progress-search">Search a city</button>

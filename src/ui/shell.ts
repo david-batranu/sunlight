@@ -19,6 +19,9 @@ import { createLightPanel, type LightPanelHandle } from './light-panel.ts';
 import { createSearchDialog, type SearchDialogHandle } from './search.ts';
 import { createTimeConsole, type TimeConsoleHandle } from './time-console.ts';
 import { createTopBar, type TopBarHandle } from './topbar.ts';
+import { createCompass, type CompassHandle } from './compass.ts';
+import { createFeatureTooltip, type FeatureTooltipHandle } from './tooltip.ts';
+import { createAreaPickHint, type AreaPickHandle } from './area-pick.ts';
 import { createPatcher, el, on } from './dom.ts';
 import { isShortcutBlocked, matchShortcut } from './shortcuts.ts';
 
@@ -61,6 +64,10 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     onOpenAbout: openAbout
   });
 
+  const compass: CompassHandle = createCompass(ctx);
+  const tooltip: FeatureTooltipHandle = createFeatureTooltip(ctx);
+  const areaPick: AreaPickHandle = createAreaPickHint(ctx);
+
   const progress = createProgressOverlay(ctx, () => openSearch());
   const errorCard = createErrorCard(ctx, { onSearch: () => openSearch() });
   const notices = createNotices(ctx);
@@ -90,9 +97,12 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
 
   app.append(
     topbar.element,
+    compass.element,
     lightPanel.element,
     lightPanel.scrim,
     timeConsole.element,
+    tooltip.element,
+    areaPick.element,
     notices.element,
     progress.element,
     errorCard.element,
@@ -157,6 +167,17 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     const action = matchShortcut(event);
     if (!action) return;
     if (action === 'close') {
+      const state = ctx.store.getState();
+      if (state.pickingArea) {
+        event.preventDefault();
+        ctx.actions.cancelAreaPick();
+        return;
+      }
+      if (state.hover) {
+        event.preventDefault();
+        ctx.actions.dismissHover();
+        return;
+      }
       const panelOpen = lightPanel?.isOpen() ?? false;
       if (panelOpen && window.matchMedia('(max-width: 680px)').matches) {
         event.preventDefault();
@@ -204,8 +225,13 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     const mood = applyBackdrop(state, light);
     app.dataset.playing = state.playing ? 'true' : 'false';
     app.dataset.loading = state.phase === 'ready' ? 'false' : 'true';
+    app.dataset.picking = state.pickingArea ? 'true' : 'false';
+    document.body.dataset.picking = state.pickingArea ? 'true' : 'false';
 
     topbar.update(state);
+    compass.update(state);
+    tooltip.update(state);
+    areaPick.update(state);
     timeConsole?.update(state, light);
     lightPanel?.update(state, light, mood);
     progress.update(state);
@@ -221,6 +247,9 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
       destroyed = true;
       disposeKeyboard();
       topbar.destroy();
+      compass.destroy();
+      tooltip.destroy();
+      areaPick.destroy();
       timeConsole?.destroy();
       lightPanel?.destroy();
       search?.destroy();
@@ -231,8 +260,10 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
       root.replaceChildren();
       delete document.body.dataset.phase;
       delete document.body.dataset.mood;
+      delete document.body.dataset.picking;
       delete app.dataset.phase;
       delete app.dataset.mood;
+      delete app.dataset.picking;
     }
   };
 }

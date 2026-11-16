@@ -4,7 +4,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_CITY_GEONAME_ID, CITY_RADIUS_M } from '../shared/constants.ts';
+import { DEFAULT_CITY_GEONAME_ID, CITY_RADIUS_M, MODEL_VERSION } from '../shared/constants.ts';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -74,6 +74,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .map((s) => s.trim())
       .filter(Boolean),
     rateLimitPerMin: Math.max(0, num(env.RATE_LIMIT_PER_MIN, 30)),
-    modelVersion: 1
+    modelVersion: MODEL_VERSION
   };
 }

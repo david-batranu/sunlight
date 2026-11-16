@@ -38,7 +38,7 @@ import type {
 } from '../../shared/types.ts';
 
 export interface ResolvedTarget {
-  key: string;                 // e.g. "gn-683844-r900-v1"
+  key: string;                 // e.g. "gn-683844-r1500-v2"
   target: ModelTarget;
   city: CityInfo;
   seedSlug: string | null;
@@ -168,9 +168,14 @@ resetCamera(): void;
 resize(): void;
 dispose(): void;
 getDebug(): SceneDebug;
+hitTest(clientX: number, clientY: number): HitFeature | null;
+getCameraAzimuth(): number;
+getGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null;
 ```
 
-`SceneDebug` is used by E2E: camera azimuth/pitch/zoom, active light
+`HitFeature` describes a named building/road/area hit (name, kindLabel, building
+height). `getGroundPoint` returns model-space metres on the y=0 plane for the
+choose-area interaction. `SceneDebug` is used by E2E: camera azimuth/pitch/zoom, active light
 (kind, direction, altitude/azimuth, intensity, shadow on/off), draw calls,
 triangles, FPS, model key. `window.__sunlight` is installed by `main.ts`.
 
@@ -182,8 +187,10 @@ triangles, FPS, model key. `window.__sunlight` is installed by `main.ts`.
 export function createUI(root: HTMLElement, ctx: UIContext): UIHandle;
 ```
 
-`UIContext` contains the store, actions, `searchCities(query)` and
-`nearestCity(lat, lon)`. The UI owns all DOM, search modal, generation overlay,
+`AppActions` additionally exposes `beginAreaPick()`, `cancelAreaPick()` and
+`dismissHover()`. `AppState` carries `cameraAzimuthDeg`, `hover` (HoverInfo) and
+`pickingArea` for the compass, tooltips and choose-area hint. `UIContext`
+contains the store, actions, `searchCities(query)` and `nearestCity(lat, lon)`. The UI owns all DOM, search modal, generation overlay,
 time console, light panel, sun-path SVG, About dialog, keyboard shortcuts and
 responsive layout. It must not import Three.js or scene modules. It renders from
 state and calls actions; no direct fetches.

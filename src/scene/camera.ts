@@ -212,3 +212,56 @@ export function dampingAlpha(k: number, dt: number): number {
   if (dt <= 0) return 1;
   return 1 - Math.exp(-k * Math.min(dt, 0.25));
 }
+
+/* ------------------------------------------------------------------ */
+/* Pointer → NDC and ground-plane picking                              */
+/* ------------------------------------------------------------------ */
+
+export interface ViewportRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Converts a client-space pointer position into normalised device coordinates
+ * for the canvas rect. Returns null for degenerate rects.
+ */
+export function ndcFromClient(
+  clientX: number,
+  clientY: number,
+  rect: ViewportRect
+): [number, number] | null {
+  if (
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(clientY) ||
+    !(rect.width > 0) ||
+    !(rect.height > 0)
+  ) {
+    return null;
+  }
+  return [
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1
+  ];
+}
+
+/**
+ * Intersects a ray with the diorama ground plane (y = 0, the plinth top).
+ * Returns model-space metres, or null when the ray is parallel to the ground
+ * or points away from it.
+ */
+export function groundPointFromRay(
+  origin: readonly [number, number, number],
+  direction: readonly [number, number, number]
+): { x: number; z: number } | null {
+  const dy = direction[1];
+  if (!Number.isFinite(dy) || Math.abs(dy) < 1e-9) return null;
+  const t = -origin[1] / dy;
+  if (!Number.isFinite(t) || t < 0) return null;
+  const x = origin[0] + direction[0] * t;
+  const z = origin[2] + direction[2] * t;
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  return { x, z };
+}
