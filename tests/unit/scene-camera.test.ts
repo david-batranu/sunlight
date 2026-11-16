@@ -51,9 +51,9 @@ function close(actual: number, expected: number, tolerance = 1e-6, label = ''): 
   );
 }
 
-test('default isometric pose looks north (180° azimuth) / 35.264° pitch / 1x zoom', () => {
+test('default isometric pose looks south-east with NW up (135° azimuth) / 35.264° pitch / 1x zoom', () => {
   const pose = defaultPose(12, 4, -9);
-  assert.equal(pose.azimuthDeg, 180);
+  assert.equal(pose.azimuthDeg, 135);
   close(pose.pitchDeg, 35.264389682754654, 1e-9);
   assert.equal(pose.zoom, DEFAULT_ZOOM);
   assert.deepEqual([pose.targetX, pose.targetY, pose.targetZ], [12, 4, -9]);

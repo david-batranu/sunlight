@@ -11,9 +11,9 @@ import { panDeltaFromDrag, type PanView } from './light.ts';
 
 const DEG_TO_RAD = Math.PI / 180;
 
-/** Default isometric azimuth (degrees clockwise from north): camera due south,
- *  so world north points straight up on screen. */
-export const DEFAULT_AZIMUTH_DEG = 180;
+/** Default isometric azimuth (degrees clockwise from north): camera in the
+ *  south-east, so world north-west points straight up on screen. */
+export const DEFAULT_AZIMUTH_DEG = 135;
 /**
  * Azimuth used when computing a conservative camera fit. A square base
  * projects widest at the 45° diagonal, so fitting there also covers the 180°

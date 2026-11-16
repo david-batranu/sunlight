@@ -299,7 +299,7 @@ test('pan changes camera target without changing light; wheel zoom changes zoom;
       { timeout: 5000 }
     );
     const reset = await readDebug(page);
-    assert.ok(Math.abs(reset.camera.azimuthDeg - 180) < 0.5);
+    assert.ok(Math.abs(reset.camera.azimuthDeg - 135) < 0.5);
     assert.ok(Math.abs(reset.camera.pitchDeg - 35.264) < 0.5);
     assert.ok(Math.hypot(reset.camera.target[0], reset.camera.target[2]) < 1);
   });
@@ -442,9 +442,9 @@ test('wide model: 1500 m city, named landmarks and a camera-following compass', 
       azimuth: window.__sunlight.getState().cameraAzimuthDeg,
       caption: document.querySelector('[data-testid="compass-view"]')?.textContent ?? ''
     }));
-    assert.equal(before.azimuth, 180, 'default view must look north');
-    assert.equal(before.caption, 'S', 'compass should read View from S');
-    assert.match(before.rotation, /rotate\(0(\.00)? 48 48\)/, 'north should be at the top of the compass');
+    assert.equal(before.azimuth, 135, 'default view must look south-east');
+    assert.equal(before.caption, 'SE', 'compass should read View from SE');
+    assert.match(before.rotation, /rotate\(45(\.00)? 48 48\)/, 'NW should be toward the top of the compass');
 
     const box = await page.locator('#scene').boundingBox();
     assert.ok(box);
@@ -469,7 +469,7 @@ test('wide model: 1500 m city, named landmarks and a camera-following compass', 
 
     await compass.click();
     await page.waitForFunction(
-      () => Math.abs(window.__sunlight.getState().cameraAzimuthDeg - 180) < 0.8,
+      () => Math.abs(window.__sunlight.getState().cameraAzimuthDeg - 135) < 0.8,
       null,
       { timeout: 5000 }
     );

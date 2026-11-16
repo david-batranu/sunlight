@@ -8,7 +8,7 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 
 - **Any city** — search a bundled index of ~65,000 populated places, or let the browser locate the nearest one. A custom “my exact location” point is supported too.
 - **Explore wider** — each city model covers a 3 km × 3 km core by default, and **Choose area** lets you recenter the diorama on any point you click. Switching cities always starts at that city’s current local date and time.
-- **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **north-up** and you can zoom from the whole city down to a few blocks (**0.45×–8×**).
+- **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **NW-up** and you can zoom from the whole city down to a few blocks (**0.45×–8×**).
 - **Real geometry & elevation** — the server fetches OpenStreetMap building footprints, roads, water, parks and railways, then samples public elevation tiles so hills, river valleys and mountains such as Brașov's Tâmpa shape the diorama instead of rendering as flat parks. The result is a compact low-poly model of a 3 km × 3 km city core with names and landmark metadata baked in. Terrain is baked into the seed models and cached with live models; if an elevation source is unreachable the model gracefully falls back to flat ground.
 - **Real light** — solar and lunar altitude/azimuth computed with `astronomy-engine`; real-time sun and moon shadows on the model, twilight transitions, moon phase brightness and polar day/night handling.
 - **Time travel** — any local date 1900–2100 and minute of day; play/pause at 1×–60× simulated minutes per second, loop a day, or jump to sunrise/sunset/golden hour.
@@ -20,7 +20,7 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 ## Screenshots
 
 ![Brașov at summer noon](qa/shots/brasov-noon.png)
-*Brașov, 21 June 2026, 13:20 — high summer sun over the old town.*
+*Brașov, 21 June 2026, 13:20 — NW-up diorama, high summer sun over the old town and the forested Tâmpa slope in the foreground.*
 
 ![Brașov at golden hour](qa/shots/brasov-golden.png)
 *The same day at 20:45 — low golden light and 18× long shadows.*
@@ -29,10 +29,10 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 *23:30 — moonlit diorama with a waxing crescent and moon shadows.*
 
 ![Mobile layout](qa/shots/brasov-mobile.png)
-*Phone layout with the collaborative time console and Sun & Moon sheet.*
+*Phone layout with a compact top bar and shorter time sheet, leaving more room for the diorama and its controls.*
 
 ![Named feature tooltip](qa/shots/feature-tooltip.png)
-*Hover or tap a named street or landmark for its placard; the compass in the top-left follows the camera.*
+*Hover or tap a named street or landmark for its placard; the compass in the top-left follows the camera. The UI collapses to a compact top bar and shorter bottom sheet on phones.*
 
 ## Quick start
 

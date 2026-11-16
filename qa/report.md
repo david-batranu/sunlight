@@ -37,7 +37,7 @@ Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs` (scree
 | 10 | Play/pause advances and holds simulated time | PASS |
 | 11 | Escape closes search and About dialogs | PASS |
 | 12 | Mobile 390×844: controls visible/in-viewport, no horizontal overflow, touch targets | PASS |
-| 13 | **Wide terrain model**: 1500 m radius → 5,000+ buildings, named landmarks/roads, 49×49 heightfield with 113.5 m relief; north-up default (compass N on top), compass rotates with camera and resets the view; 8× zoom available | PASS |
+| 13 | **Wide terrain model**: 1500 m radius → 5,000+ buildings, named landmarks/roads, 49×49 heightfield with 113.5 m relief; NW-up default (compass NW toward the top), compass rotates with camera and resets the view; 8× zoom available | PASS |
 | 14 | **Feature tooltips**: hover shows the named feature under the pointer, click pins it with a close button, Escape dismisses | PASS |
 | 15 | **Choose area**: button enables, pressed state, hint banner, body crosshair state, Cancel + Escape exit the mode | PASS (manual full recenter verified against the fixture provider: new `pt-…` model, city “Near Brașov”, date/time preserved) |
 | 16 | **City switch → new city's local now**: historical deep link then switch to Cluj → local today and current minute | PASS |
@@ -53,10 +53,10 @@ No page errors or console errors in any of the 23 browser runs.
 
 | File | State |
 |------|-------|
-| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide north-up diorama, terrain (Tâmpa in the foreground), compass, Choose area |
+| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide NW-up diorama, terrain (Tâmpa in the foreground), compass, Choose area |
 | `brasov-golden.png` | 20:45, sun 3.1° WNW, long shadows across the terrain |
 | `brasov-night.png` | 23:30, sun −16°, moonlight |
-| `brasov-mobile.png` | 390×844 @2×, noon, compass + bottom sheet |
+| `brasov-mobile.png` | 390×844 @2×, noon, compact compass + 218 px bottom sheet |
 | `brasov-morning.png` | 07:30, sun 18.4° ENE — opposite shadow direction evidence (re-run if present) |
 | `feature-tooltip.png` | pinned tooltip for “Strada Poarta Șchei · Primary street” |
 
@@ -83,4 +83,4 @@ Visual review: composition and warm placard design remain coherent; panels do no
 
 ## Recommendation
 
-Accept the v3 pass: real elevation (Tâmpa now rises as a coherent forested mountain rather than a flat park), a north-up default view with 8× zoom, wide 3 km models, landmark/road tooltips, orientation compass, choose-area recentering, and city-local-now switching are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.
+Accept the v3 pass: real elevation (Tâmpa now rises as a coherent forested mountain rather than a flat park), a NW-up default view with 8× zoom, wide 3 km models, landmark/road tooltips, orientation compass, choose-area recentering, and city-local-now switching are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.
