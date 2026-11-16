@@ -12,14 +12,14 @@ services:
       PORT: "8090"
       HOST: "0.0.0.0"
       CACHE_DIR: "/data/cache"
-      CACHE_MAX_MB: "1024"
+      CACHE_MAX_MB: "${CACHE_MAX_MB:-1024}"
       CITY_RADIUS_M: "1500"
       GENERATION_CONCURRENCY: "1"
-      CITY_SOURCE: "auto"
+      CITY_SOURCE: "${CITY_SOURCE:-auto}"
       DEFAULT_CITY: "gn-683844"
       # Put a real contact URL/address here before exposing the service publicly.
-      OSM_USER_AGENT: "SunlightCity/0.1 (+https://example.com/sunlight)"
-      RATE_LIMIT_PER_MIN: "30"
+      OSM_USER_AGENT: "${OSM_USER_AGENT:-SunlightCity/0.2 (+https://github.com/david-batranu/sunlight)}"
+      RATE_LIMIT_PER_MIN: "${RATE_LIMIT_PER_MIN:-30}"
     volumes:
       - sunlight-cache:/data/cache
     networks:
