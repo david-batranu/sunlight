@@ -51,7 +51,7 @@ const uiRoot = document.querySelector<HTMLElement>('#ui');
 const boot = document.querySelector<HTMLElement>('#boot');
 if (!canvas || !uiRoot) throw new Error('Sunlight: missing #scene or #ui');
 
-const api = createApi();
+const api = createApi(import.meta.env.BASE_URL || '/');
 const scene: SceneHandle = createScene(canvas);
 const store = createStore(createInitialState());
 const urlState = parseUrlState(window.location.search);

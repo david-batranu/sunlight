@@ -1,10 +1,13 @@
 services:
   sunlight:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_BASE: "${VITE_BASE:-/}"
     image: sunlight:local
     container_name: sunlight
     ports:
-      - "8090:8090"
+      - "127.0.0.1:8090:8090"
     environment:
       PORT: "8090"
       HOST: "0.0.0.0"
@@ -19,6 +22,8 @@ services:
       RATE_LIMIT_PER_MIN: "30"
     volumes:
       - sunlight-cache:/data/cache
+    networks:
+      - sunlight
     restart: unless-stopped
     healthcheck:
       test:
@@ -36,3 +41,8 @@ services:
 volumes:
   sunlight-cache:
     name: sunlight-cache
+
+networks:
+  sunlight:
+    name: sunlight
+    driver: bridge

@@ -3,6 +3,9 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
 ENV npm_config_cache=/tmp/npm-cache
+# Mount path baked into asset URLs/API base; default is root for local Docker.
+ARG VITE_BASE=/
+ENV VITE_BASE=$VITE_BASE
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
