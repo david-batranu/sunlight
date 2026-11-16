@@ -61,6 +61,45 @@ docker compose up --build
 
 The Compose stack persists generated models in the `sunlight-cache` named volume and runs as a non-root user with a healthcheck. First start is fast because the seed cities are baked into the image.
 
+## Subpath deployment (Caddy / Docker network)
+
+Sunlight can be mounted under a path such as `https://seekahead.eu/sunlight/`.
+Build with a base path and attach the app to a named Docker network:
+
+```bash
+VITE_BASE=/sunlight/ docker compose build
+docker compose up -d          # creates the external network `sunlight`
+```
+
+Caddy joins that network and strips the prefix:
+
+```caddyfile
+seekahead.eu {
+    redir /sunlight /sunlight/ 308
+    handle_path /sunlight/* {
+        reverse_proxy sunlight:8090
+    }
+    ...
+}
+```
+
+```yaml
+# /srv/caddy/docker-compose.yml
+services:
+  caddy:
+    networks: [..., sunlight]
+
+networks:
+  sunlight:
+    external: true
+    name: sunlight
+```
+
+The container port can stay loopback-only (`127.0.0.1:8090:8090`); Caddy reaches
+the app over the shared `sunlight` network as `sunlight:8090`. Set
+`VITE_BASE` in the deployment `.env` so later `docker compose build` runs keep
+the prefix. When running locally, omit it and the SPA stays at `/`.
+
 ## How it works
 
 ```
