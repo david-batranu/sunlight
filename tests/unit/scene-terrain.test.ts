@@ -50,7 +50,7 @@ function terrainModel(): CityModel {
     terrain: TERRAIN,
     buildings: [{ p: [-2000, -2000, 2000, -2000, 2000, 2000, -2000, 2000], h: 100, t: 0, r: 0 }],
     roads: [{ c: 2, p: [-8000, 0, 8000, 0] }],
-    areas: [{ k: 3, p: [-5000, -5000, 5000, -5000, 5000, 5000, -5000, 5000] }]
+    areas: [{ k: 4, p: [-5000, -5000, 5000, -5000, 5000, 5000, -5000, 5000] }]
   };
 }
 
@@ -98,14 +98,28 @@ test('roads and areas are draped over terrain', () => {
   const area = buildAreas(model);
   const areaRange = yRange(area.positions);
   assert.ok(area.triangles > 0);
-  assert.ok(areaRange.min >= AREA_LIFT_M[3], 'forest surface should stay above terrain');
+  assert.ok(areaRange.min >= AREA_LIFT_M[4], 'grass surface should stay above terrain');
 
   const buffers = buildModelBuffers(model, modelExtentsFor(model));
   assert.ok(buffers.terrain.triangles > 0);
 });
 
+test('steep forests are baked into terrain instead of floating overlays', () => {
+  const model = terrainModel();
+  model.areas = [{ k: 3, p: [-5000, -5000, 5000, -5000, 5000, 5000, -5000, 5000] }];
+  assert.equal(buildAreas(model).triangles, 0, 'steep forest overlay should be skipped');
+  // The terrain still exists (and receives the forest tint in its colours).
+  assert.ok(buildTerrain(model).triangles > 0);
+  // A flat forest remains a normal overlay.
+  const flat = terrainModel();
+  flat.terrain = { ...TERRAIN, h: new Array(9).fill(0) };
+  flat.areas = [{ k: 3, p: [-5000, -5000, 5000, -5000, 5000, 5000, -5000, 5000] }];
+  assert.ok(buildAreas(flat).triangles > 0);
+});
+
 test('trees use the terrain height and extents include the relief', () => {
   const model = terrainModel();
+  model.areas = [{ k: 3, p: [-5000, -5000, 5000, -5000, 5000, 5000, -5000, 5000] }];
   const sites = sampleTreeSites(model);
   assert.ok(sites.length > 0);
   for (const site of sites) {

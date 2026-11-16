@@ -112,7 +112,7 @@ export function createInitialState(): AppState {
     generatingName: null,
     error: null,
     current: null,
-    cameraAzimuthDeg: 45,
+    cameraAzimuthDeg: 180,
     hover: null,
     pickingArea: false,
     notices: [],

@@ -32,6 +32,8 @@ const EPSILON = 1e-6;
 /** Half a metre above the ground plate, then feature-class lift layers. */
 export const ROAD_LIFT_M = 0.42;
 export const TERRAIN_LIFT_M = 0.05;
+/** Client-side subdivision of each wire heightfield cell (visual smoothing). */
+export const TERRAIN_MESH_SUBDIVISIONS = 4;
 export const AREA_LIFT_M: Readonly<Record<number, number>> = {
   1: 0.16, // water
   2: 0.26, // park
@@ -417,6 +419,40 @@ export function pointInRing(x: number, z: number, ring: readonly number[]): bool
 /* Terrain heightfield                                                */
 /* ------------------------------------------------------------------ */
 
+/** Terrain relief under an area's vertices, in metres. */
+function areaTerrainReliefM(terrain: TerrainRecord, area: { p: number[] }): number {
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i + 1 < area.p.length; i += 2) {
+    const height = terrainHeightM(terrain, area.p[i] / DM_PER_M, area.p[i + 1] / DM_PER_M);
+    if (height < min) min = height;
+    if (height > max) max = height;
+  }
+  return Number.isFinite(min) ? max - min : 0;
+}
+
+/** Steep forest polygons are painted into the terrain instead of floated on it. */
+export const FOREST_DRAPE_RELIEF_M = 2.5;
+
+function isTerrainForest(
+  terrain: TerrainRecord,
+  area: { k: number; p: number[] }
+): boolean {
+  return area.k === 3 && areaTerrainReliefM(terrain, area) > FOREST_DRAPE_RELIEF_M;
+}
+
+function pointInArea(
+  x: number,
+  z: number,
+  area: { p: number[]; holes?: number[][] }
+): boolean {
+  if (!pointInRing(x, z, area.p)) return false;
+  for (const hole of area.holes ?? []) {
+    if (pointInRing(x, z, hole)) return false;
+  }
+  return true;
+}
+
 function terrainColor(heightM: number, maxHeightM: number, variation: number): RGB {
   const t = maxHeightM > 0.5 ? Math.max(0, Math.min(1, heightM / maxHeightM)) : 0;
   const base =
@@ -444,22 +480,52 @@ export function buildTerrain(model: CityModel | null): MeshBuffers {
   const maxHeightM = terrainMaxHeightDm(terrain) / DM_PER_M;
   const heightAt = (col: number, row: number): number =>
     terrain.h[row * cols + col] / DM_PER_M + TERRAIN_LIFT_M;
+  const forestAreas = (model?.areas ?? []).filter((area) => isTerrainForest(terrain, area));
 
+  const sub = TERRAIN_MESH_SUBDIVISIONS;
   for (let row = 0; row + 1 < rows; row += 1) {
-    const za = z0 + row * step;
-    const zb = za + step;
     for (let col = 0; col + 1 < cols; col += 1) {
-      const xa = x0 + col * step;
-      const xb = xa + step;
       const h00 = heightAt(col, row);
       const h10 = heightAt(col + 1, row);
       const h01 = heightAt(col, row + 1);
       const h11 = heightAt(col + 1, row + 1);
-      const variance = hashUnit(row * 92821 + col * 68917 + 7);
-      const colorA = terrainColor((h00 + h10 + h11) / 3, maxHeightM, variance);
-      const colorB = terrainColor((h00 + h11 + h01) / 3, maxHeightM, hashUnit(variance * 9973));
-      builder.tri(xa, h00, za, xb, h10, za, xb, h11, zb, colorA, 0, 1, 0);
-      builder.tri(xa, h00, za, xb, h11, zb, xa, h01, zb, colorB, 0, 1, 0);
+      const cellX = x0 + col * step;
+      const cellZ = z0 + row * step;
+      for (let sz = 0; sz < sub; sz += 1) {
+        const v0 = sz / sub;
+        const v1 = (sz + 1) / sub;
+        for (let sx = 0; sx < sub; sx += 1) {
+          const u0 = sx / sub;
+          const u1 = (sx + 1) / sub;
+          const height = (u: number, v: number): number =>
+            h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
+          const ha = height(u0, v0);
+          const hb = height(u1, v0);
+          const hc = height(u1, v1);
+          const hd = height(u0, v1);
+          const xa = cellX + u0 * step;
+          const xb = cellX + u1 * step;
+          const za = cellZ + v0 * step;
+          const zb = cellZ + v1 * step;
+          const variance = hashUnit(row * 92821 + col * 68917 + sz * 7727 + sx * 104729 + 7);
+          const midAX = (xa + xb + xb) / 3;
+          const midAZ = (za + za + zb) / 3;
+          const midBX = (xa + xb + xa) / 3;
+          const midBZ = (za + zb + zb) / 3;
+          let colorA = terrainColor((ha + hb + hc) / 3, maxHeightM, variance);
+          let colorB = terrainColor((ha + hc + hd) / 3, maxHeightM, hashUnit(variance * 9973));
+          if (forestAreas.length > 0) {
+            if (forestAreas.some((area) => pointInArea(midAX, midAZ, area))) {
+              colorA = mixRgb(colorA, AREA_COLORS[3], 0.82);
+            }
+            if (forestAreas.some((area) => pointInArea(midBX, midBZ, area))) {
+              colorB = mixRgb(colorB, AREA_COLORS[3], 0.82);
+            }
+          }
+          builder.tri(xa, ha, za, xb, hb, za, xb, hc, zb, colorA, 0, 1, 0);
+          builder.tri(xa, ha, za, xb, hc, zb, xa, hd, zb, colorB, 0, 1, 0);
+        }
+      }
     }
   }
 
@@ -704,14 +770,23 @@ export function buildRoads(model: CityModel): MeshBuffers {
       if (length < 0.2) continue;
       const nx = (-dz / length) * half;
       const nz = (dx / length) * half;
-      // Quad a-left, b-left, b-right, a-right (draped over terrain).
-      builder.quad(
-        ax + nx, groundAt(ax + nx, az + nz), az + nz,
-        bx + nx, groundAt(bx + nx, bz + nz), bz + nz,
-        bx - nx, groundAt(bx - nx, bz - nz), bz - nz,
-        ax - nx, groundAt(ax - nx, az - nz), az - nz,
-        color, 0, 1, 0
-      );
+      // Split long segments so the ribbon follows the terrain, not a chord.
+      const pieces = terrain ? Math.max(1, Math.min(12, Math.ceil(length / 12))) : 1;
+      for (let piece = 0; piece < pieces; piece += 1) {
+        const t0 = piece / pieces;
+        const t1 = (piece + 1) / pieces;
+        const ax0 = ax + dx * t0;
+        const az0 = az + dz * t0;
+        const bx0 = ax + dx * t1;
+        const bz0 = az + dz * t1;
+        builder.quad(
+          ax0 + nx, groundAt(ax0 + nx, az0 + nz), az0 + nz,
+          bx0 + nx, groundAt(bx0 + nx, bz0 + nz), bz0 + nz,
+          bx0 - nx, groundAt(bx0 - nx, bz0 - nz), bz0 - nz,
+          ax0 - nx, groundAt(ax0 - nx, az0 - nz), az0 - nz,
+          color, 0, 1, 0
+        );
+      }
     }
 
     // Fill small gaps at polyline joints (same colour, so overdraw is
@@ -786,6 +861,9 @@ export function buildAreas(model: CityModel): MeshBuffers {
       continue;
     }
     const kind = area.k ?? 4;
+    // Steep forests are baked into the terrain colour: floating a separate
+    // dark-green sheet over the slope reads as a sticker and z-fights.
+    if (terrain && isTerrainForest(terrain, area)) continue;
     // Keep draped areas below the road layer (roads stay readable on slopes).
     const lift = (AREA_LIFT_M[kind] ?? 0.22) + (terrain ? 0.06 : 0);
     const color = areaColorFor(kind, hashUnit(index * 7 + 211));
@@ -811,7 +889,9 @@ export function buildAreas(model: CityModel): MeshBuffers {
       const centerY = terrainHeightM(terrain, (ax + bx + cx) / 3, (az + bz + cz) / 3) + lift;
       const linearY = (ya + yb + yc) / 3;
       const error = Math.abs(centerY - linearY);
-      if ((maxEdge > 22 || error > 0.12) && depth < 6 && emitted < 3000) {
+      // Only refine where the linear triangle would visibly cut into the
+      // heightfield; flat parks stay cheap and large.
+      if (error > 0.025 && depth < 8 && emitted < 4000) {
         const mabx = (ax + bx) / 2;
         const mabz = (az + bz) / 2;
         const mbcx = (bx + cx) / 2;

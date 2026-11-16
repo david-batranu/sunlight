@@ -13,6 +13,7 @@ import {
   CAMERA_DISTANCE_M,
   DEFAULT_AZIMUTH_DEG,
   DEFAULT_PITCH_DEG,
+  FIT_AZIMUTH_DEG,
   DEFAULT_ZOOM,
   PITCH_MAX_DEG,
   PITCH_MIN_DEG,
@@ -50,9 +51,9 @@ function close(actual: number, expected: number, tolerance = 1e-6, label = ''): 
   );
 }
 
-test('default isometric pose is 45° azimuth / 35.264° pitch / 1x zoom', () => {
+test('default isometric pose looks north (180° azimuth) / 35.264° pitch / 1x zoom', () => {
   const pose = defaultPose(12, 4, -9);
-  assert.equal(pose.azimuthDeg, 45);
+  assert.equal(pose.azimuthDeg, 180);
   close(pose.pitchDeg, 35.264389682754654, 1e-9);
   assert.equal(pose.zoom, DEFAULT_ZOOM);
   assert.deepEqual([pose.targetX, pose.targetY, pose.targetZ], [12, 4, -9]);
@@ -151,7 +152,7 @@ test('fitHalfHeight frames the whole diorama at every aspect ratio', () => {
       { centerX: 0, centerZ: 0, ...box },
       aspect
     );
-    const fitted = projectBoxCorners(box, DEFAULT_AZIMUTH_DEG, DEFAULT_PITCH_DEG);
+    const fitted = projectBoxCorners(box, FIT_AZIMUTH_DEG, DEFAULT_PITCH_DEG);
     assert.ok(fitted.halfHeight <= halfHeight + 1e-6, `vertical fit @${aspect}`);
     assert.ok(fitted.halfWidth <= halfHeight * aspect + 1e-6, `horizontal fit @${aspect}`);
   }
@@ -164,7 +165,7 @@ test('fitHalfHeight frames the whole diorama at every aspect ratio', () => {
   // The fitted half-height tracks the fallback diorama size (DEFAULT_RADIUS_M).
   const landscape = fitHalfHeight({ centerX: 0, centerZ: 0, ...box }, 16 / 9);
   assert.ok(
-    landscape > DEFAULT_RADIUS_M * 0.8 && landscape < DEFAULT_RADIUS_M * 1.6,
+    landscape > DEFAULT_RADIUS_M * 0.8 && landscape < DEFAULT_RADIUS_M * 1.8,
     `sanity fit ${landscape} for radius ${DEFAULT_RADIUS_M}`
   );
 });

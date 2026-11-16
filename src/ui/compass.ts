@@ -102,7 +102,7 @@ export function createCompass(ctx: UIContext): CompassHandle {
         <circle class="sl-compass-hub" cx="48" cy="48" r="2.4"/>
       </svg>
     </span>
-    <span class="sl-compass-caption">${viewFromLabel(45)}</span>
+    <span class="sl-compass-caption">${viewFromLabel(180)}</span>
   `
   );
   element.dataset.testid = 'compass';
@@ -114,7 +114,7 @@ export function createCompass(ctx: UIContext): CompassHandle {
   const caption = q<HTMLElement>(element, '.sl-compass-caption');
   const viewDirection = document.createElement('b');
   viewDirection.dataset.testid = 'compass-view';
-  viewDirection.textContent = compassDirection(45);
+  viewDirection.textContent = compassDirection(180);
   caption.replaceChildren(document.createTextNode('View from '), viewDirection);
   const labels = Array.from(element.querySelectorAll<SVGTextElement>('.sl-compass-label'));
 
@@ -147,7 +147,7 @@ export function createCompass(ctx: UIContext): CompassHandle {
     applyAzimuth(state.cameraAzimuthDeg);
   }
 
-  applyAzimuth(45);
+  applyAzimuth(180);
 
   return {
     element,

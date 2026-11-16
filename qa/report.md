@@ -14,14 +14,14 @@ Scope: real headless-Chrome E2E, visual QA, accessibility basics, performance sm
 ## Commands
 
 ```bash
-npm test                          # unit + integration, offline fixtures: 311/311
+npm test                          # unit + integration, offline fixtures: 312/312
 npm run test:e2e                  # build + seed-only server + Chrome: 23/23
 E2E_SKIP_BUILD=1 npm run test:e2e # reuse current build (~53 s)
 ```
 
 Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs` (screenshots, visual, perf, a11y), helpers in `tests/e2e/helpers.mjs`; node:test + playwright-core.
 
-## Result: GREEN — 23/23 E2E checks pass, 0 fail; 311/311 unit + integration tests pass
+## Result: GREEN — 23/23 E2E checks pass, 0 fail; 312/312 unit + integration tests pass
 
 | # | Check | Result |
 |---|-------|--------|
@@ -37,12 +37,12 @@ Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs` (scree
 | 10 | Play/pause advances and holds simulated time | PASS |
 | 11 | Escape closes search and About dialogs | PASS |
 | 12 | Mobile 390×844: controls visible/in-viewport, no horizontal overflow, touch targets | PASS |
-| 13 | **Wide terrain model**: 1500 m radius → 5,000+ buildings, named landmarks/roads, 49×49 heightfield with 113.5 m relief; compass rose + caption rotate with camera and reset the view | PASS |
+| 13 | **Wide terrain model**: 1500 m radius → 5,000+ buildings, named landmarks/roads, 49×49 heightfield with 113.5 m relief; north-up default (compass N on top), compass rotates with camera and resets the view; 8× zoom available | PASS |
 | 14 | **Feature tooltips**: hover shows the named feature under the pointer, click pins it with a close button, Escape dismisses | PASS |
 | 15 | **Choose area**: button enables, pressed state, hint banner, body crosshair state, Cancel + Escape exit the mode | PASS (manual full recenter verified against the fixture provider: new `pt-…` model, city “Near Brașov”, date/time preserved) |
 | 16 | **City switch → new city's local now**: historical deep link then switch to Cluj → local today and current minute | PASS |
 | 17–19 | Canonical screenshots, mobile screenshot, brightness ordering | PASS |
-| 20 | Performance smoke (9 draw calls, 437k triangles, terrain included) | PASS |
+| 20 | Performance smoke (9 draw calls, 574k scene triangles incl. shadow pass, terrain included) | PASS |
 | 21 | A11y roles/names, slider `aria-valuetext`, date label, compass name, focus-visible | PASS |
 | 22 | Dialog focus trap and Escape restore | PASS |
 | 23 | Reduced-motion preference suppresses transitions | PASS |
@@ -53,7 +53,7 @@ No page errors or console errors in any of the 23 browser runs.
 
 | File | State |
 |------|-------|
-| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide diorama, terrain (Tâmpa on the left), compass, Choose area |
+| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide north-up diorama, terrain (Tâmpa in the foreground), compass, Choose area |
 | `brasov-golden.png` | 20:45, sun 3.1° WNW, long shadows across the terrain |
 | `brasov-night.png` | 23:30, sun −16°, moonlight |
 | `brasov-mobile.png` | 390×844 @2×, noon, compass + bottom sheet |
@@ -65,7 +65,7 @@ Visual review: composition and warm placard design remain coherent; panels do no
 
 ## Performance smoke
 
-- 1440×900, production build, SwiftShader: **9 draw calls, 437,405 triangles, ~22 fps**
+- 1440×900, production build, SwiftShader: **9 draw calls, 574,321 scene triangles (including the shadow pass), ~22 fps**
   (SwiftShader is software rasterisation; FPS is not representative of a hardware GPU).
 - Model: 367.4 KiB gzip for Brașov at 1500 m / 8,465 buildings including the 49 × 49 heightfield; sky payload ~4.3 KB gzip.
 - Live generation verified separately: Sinaia v3 generated through the worker with a 160 m-clamped terrain relief sample (AWS tiles reachable).
@@ -76,11 +76,11 @@ Visual review: composition and warm placard design remain coherent; panels do no
 | Sev | Area | Issue |
 |-----|------|-------|
 | Minor | Visual, mobile | Portrait 390×844 fits the full wide base, so the diorama can read small with empty sky; portrait-specific framing is a follow-up. |
-| Minor | Terrain | Terrain is a single 49 × 49 heightfield, 0.3× exaggerated and capped at 160 m; cliffs, bridges and precise summits outside the 3 km square are not modelled. |
+| Minor | Terrain | Terrain is a single 49 × 49 heightfield, 0.3× exaggerated and capped at 160 m; cliffs, bridges and precise summits outside the 3 km square are not modelled. Steep forests are painted into the terrain rather than drape meshes. |
 | Minor | Perf | FPS must be re-checked on a hardware GPU; the SwiftShader number is a smoke test. |
 | Info | E2E | Choose-area full recentering is verified manually against a fixture-capable server; the automated E2E server is seed-only, so the test covers the UI/mode contract only. |
 | Info | Data | Heights are often inferred; some labels (e.g. cemetery areas) use broad kind names. |
 
 ## Recommendation
 
-Accept the v3 pass: real elevation (Tâmpa now rises as a mountain rather than a flat park), wide 3 km models, landmark/road tooltips, orientation compass, choose-area recentering, and city-local-now switching are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.
+Accept the v3 pass: real elevation (Tâmpa now rises as a coherent forested mountain rather than a flat park), a north-up default view with 8× zoom, wide 3 km models, landmark/road tooltips, orientation compass, choose-area recentering, and city-local-now switching are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.

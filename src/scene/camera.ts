@@ -11,14 +11,21 @@ import { panDeltaFromDrag, type PanView } from './light.ts';
 
 const DEG_TO_RAD = Math.PI / 180;
 
-/** Default isometric azimuth (degrees clockwise from north). */
-export const DEFAULT_AZIMUTH_DEG = 45;
+/** Default isometric azimuth (degrees clockwise from north): camera due south,
+ *  so world north points straight up on screen. */
+export const DEFAULT_AZIMUTH_DEG = 180;
+/**
+ * Azimuth used when computing a conservative camera fit. A square base
+ * projects widest at the 45° diagonal, so fitting there also covers the 180°
+ * north-up default and any orbit angle.
+ */
+export const FIT_AZIMUTH_DEG = 45;
 /** Classic isometric elevation: atan(1/√2) radians. */
 export const DEFAULT_PITCH_DEG = 35.264389682754654;
 export const PITCH_MIN_DEG = 18;
 export const PITCH_MAX_DEG = 72;
 export const ZOOM_MIN = 0.45;
-export const ZOOM_MAX = 3.2;
+export const ZOOM_MAX = 8;
 export const DEFAULT_ZOOM = 1;
 /** Margin around the projected model so nothing touches the viewport edge. */
 export const FIT_PADDING = 1.1;
@@ -119,14 +126,14 @@ export function orthoFrustum(halfHeight: number, aspect: number): FrustumRect {
  * Half-height (in world metres) of the orthographic view needed to fit the
  * model with the default isometric orientation.
  *
- * Fitting against the default orientation (rather than the current one) keeps
- * the zoom level stable while orbiting: the 45° diagonal is the widest the
- * square base ever projects to, so a fit computed there also fits at 0°/90°.
+ * Fitting against the widest 45° diagonal (rather than the current or default
+ * orientation) keeps the zoom level stable while orbiting and guarantees the
+ * 180° north-up pose and every orbit angle stay inside the frustum.
  */
 export function fitHalfHeight(
   box: FitBox,
   aspect: number,
-  azimuthDeg = DEFAULT_AZIMUTH_DEG,
+  azimuthDeg = FIT_AZIMUTH_DEG,
   pitchDeg = DEFAULT_PITCH_DEG,
   padding = FIT_PADDING
 ): number {

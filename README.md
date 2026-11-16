@@ -8,7 +8,7 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 
 - **Any city** — search a bundled index of ~65,000 populated places, or let the browser locate the nearest one. A custom “my exact location” point is supported too.
 - **Explore wider** — each city model covers a 3 km × 3 km core by default, and **Choose area** lets you recenter the diorama on any point you click. Switching cities always starts at that city’s current local date and time.
-- **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height. A compact compass rotates with the camera and doubles as a reset-view button.
+- **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **north-up** and you can zoom from the whole city down to a few blocks (**0.45×–8×**).
 - **Real geometry & elevation** — the server fetches OpenStreetMap building footprints, roads, water, parks and railways, then samples public elevation tiles so hills, river valleys and mountains such as Brașov's Tâmpa shape the diorama instead of rendering as flat parks. The result is a compact low-poly model of a 3 km × 3 km city core with names and landmark metadata baked in. Terrain is baked into the seed models and cached with live models; if an elevation source is unreachable the model gracefully falls back to flat ground.
 - **Real light** — solar and lunar altitude/azimuth computed with `astronomy-engine`; real-time sun and moon shadows on the model, twilight transitions, moon phase brightness and polar day/night handling.
 - **Time travel** — any local date 1900–2100 and minute of day; play/pause at 1×–60× simulated minutes per second, loop a day, or jump to sunrise/sunset/golden hour.
@@ -210,7 +210,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (23/23 E2E checks green; unit + integration suite 311 tests).
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (23/23 E2E checks green; unit + integration suite 312 tests).
 
 ## Project layout
 
