@@ -1,0 +1,42 @@
+{
+  "name": "sunlight",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An isometric low-poly city diorama with real sun and moon light for any date and time.",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "node --watch server/index.ts",
+    "dev:web": "vite",
+    "build": "npm run typecheck && node scripts/build-server.mjs && vite build",
+    "start": "node dist-server/index.js",
+    "typecheck": "tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "node --test --test-reporter=spec tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --test --test-reporter=spec tests/unit/*.test.ts",
+    "test:integration": "node --test --test-reporter=spec tests/integration/*.test.ts",
+    "test:e2e": "node scripts/e2e.mjs",
+    "build:index": "node scripts/build-city-index.mjs",
+    "bake:seeds": "node scripts/bake-seeds.mjs",
+    "cache:clear": "node scripts/clear-cache.mjs"
+  },
+  "dependencies": {
+    "astronomy-engine": "2.1.19",
+    "earcut": "3.2.4",
+    "sax": "1.6.1",
+    "three": "0.187.0",
+    "tz-lookup": "6.1.25"
+  },
+  "devDependencies": {
+    "@types/earcut": "3.2.4",
+    "@types/node": "26.6.6",
+    "@types/sax": "1.2.7",
+    "@types/three": "0.187.0",
+    "esbuild": "0.28.2",
+    "playwright-core": "1.65.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.8"
+  }
+}

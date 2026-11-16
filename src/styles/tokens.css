@@ -1,0 +1,6 @@
+/* Design tokens are filled in by the UI workstream. */
+:root {
+  --radius-panel: 16px;
+  --shadow-panel: 0 18px 50px rgba(28, 22, 16, 0.18);
+  --panel-gap: 16px;
+}

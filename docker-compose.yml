@@ -1,0 +1,38 @@
+services:
+  sunlight:
+    build: .
+    image: sunlight:local
+    container_name: sunlight
+    ports:
+      - "8090:8090"
+    environment:
+      PORT: "8090"
+      HOST: "0.0.0.0"
+      CACHE_DIR: "/data/cache"
+      CACHE_MAX_MB: "1024"
+      CITY_RADIUS_M: "900"
+      GENERATION_CONCURRENCY: "1"
+      CITY_SOURCE: "auto"
+      DEFAULT_CITY: "gn-683844"
+      # Put a real contact URL/address here before exposing the service publicly.
+      OSM_USER_AGENT: "SunlightCity/0.1 (+https://example.com/sunlight)"
+      RATE_LIMIT_PER_MIN: "30"
+    volumes:
+      - sunlight-cache:/data/cache
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8090/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  sunlight-cache:
+    name: sunlight-cache

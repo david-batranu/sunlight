@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-server
+.cache
+.git
+qa/shots
+tests/e2e
+docs
+README.md
+*.log
+.DS_Store
+.env
