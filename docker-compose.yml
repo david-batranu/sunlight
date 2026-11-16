@@ -3,8 +3,8 @@ services:
     build:
       context: .
       args:
-        VITE_BASE: "${VITE_BASE:-/}"
-    image: sunlight:local
+        VITE_BASE: "${VITE_BASE:-./}"
+    image: "${SUNLIGHT_IMAGE:-sunlight:local}"
     container_name: sunlight
     ports:
       - "127.0.0.1:8090:8090"

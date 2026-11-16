@@ -61,6 +61,32 @@ docker compose up --build
 
 The Compose stack persists generated models in the `sunlight-cache` named volume and runs as a non-root user with a healthcheck. First start is fast because the seed cities are baked into the image.
 
+## Container image (GHCR)
+
+Every push to `master` (and every `v*` tag) builds and publishes a multi-arch
+image for `linux/amd64` and `linux/arm64`:
+
+```bash
+docker pull ghcr.io/david-batranu/sunlight:latest
+```
+
+Tags: `latest` (default branch), `master`, `sha-<commit>`, and version tags.
+The image is path-portable: assets are built with a relative base and the SPA
+derives its API base from the page URL, so the same image works at `/` or
+behind a prefix such as `/sunlight/`.
+
+To run the prebuilt image with the bundled Compose file instead of building
+locally:
+
+```bash
+export SUNLIGHT_IMAGE=ghcr.io/david-batranu/sunlight:latest
+docker compose pull
+docker compose up -d --no-build
+```
+
+The workflow lives in [`.github/workflows/container.yml`](.github/workflows/container.yml)
+and uses the repository `GITHUB_TOKEN` with `packages: write`.
+
 ## Subpath deployment (Caddy / Docker network)
 
 Sunlight can be mounted under a path such as `https://seekahead.eu/sunlight/`.
