@@ -15,6 +15,20 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 - **Warm collector’s-diorama design** — crafted plinth, cream placards, terracotta/gold accents, and a sky backdrop that shifts from daylight to golden hour to moonlit night.
 - **Works offline for seeded cities** — no API key, no external database.
 
+## Screenshots
+
+![Brașov at summer noon](qa/shots/brasov-noon.png)
+*Brașov, 21 June 2026, 13:20 — high summer sun over the old town.*
+
+![Brașov at golden hour](qa/shots/brasov-golden.png)
+*The same day at 20:45 — low golden light and 18× long shadows.*
+
+![Brașov by moonlight](qa/shots/brasov-night.png)
+*23:30 — moonlit diorama with a waxing crescent and moon shadows.*
+
+![Mobile layout](qa/shots/brasov-mobile.png)
+*Phone layout with the collaborative time console and Sun & Moon sheet.*
+
 ## Quick start
 
 Requirements: Node.js **22.18+** (Node 24 LTS recommended) and npm.
@@ -112,7 +126,7 @@ Copy `.env.example` to `.env` or pass environment variables. Everything is optio
 
 - Models are cached under `CACHE_DIR/models/<key>.json.gz` with a sidecar metadata file; writes are atomic.
 - Responses carry strong ETags and are immutable per model version; repeat visits are served from disk and revalidate with `304`.
-- Raw provider responses are cached for 30 days so interrupted generations can resume cheaply.
+- Provider responses are not persisted between attempts in v1; a failed generation is retried from scratch or falls back to a bundled seed where available.
 - The cache key includes the model version and radius. Bump `MODEL_VERSION` in `shared/constants.ts` and run `npm run cache:clear` when changing the model format.
 - Seeds live in `server/data/seeds/` with a SHA-256 manifest and are read-only at runtime.
 - In Docker, the `sunlight-cache` volume survives container restarts and rebuilds.
@@ -125,7 +139,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`.
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest independent browser QA report is in [`qa/report.md`](qa/report.md) (19/19 checks green; unit + integration suite 261 tests).
 
 ## Project layout
 
@@ -143,6 +157,7 @@ qa/             Screenshots and QA notes
 ## Known limitations
 
 - Flat city core: no terrain, hills or bridges; a diorama, not a survey model.
+- On narrow portrait screens the diorama deliberately fits the full base, so some sky remains above/below; a portrait-specific camera framing is a follow-up.
 - 1.8 km core per city; surrounding districts are not included.
 - Height tags are sparse in OSM, so most buildings receive an inferred height (local median + building type + deterministic variation), not a surveyed one.
 - Clear-sky lighting only: no weather or clouds.

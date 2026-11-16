@@ -215,5 +215,9 @@ The lead wires the city service, sky service and static SPA serving.
 
 - In-process generation is acceptable if worker_threads proves flaky, provided
   the async job API and progress behave identically.
+- Raw provider responses are not cached between generation attempts in v1;
+  only generated models and seeds are persisted.
+- `bounds` describe actual geometry extents, not the requested square.
+- Courtyard holes on building relations are ignored with a warning.
 - Optional polish (gable roofs, park trees, night window glow) is not
   acceptance-critical; only add it if core budgets are met.

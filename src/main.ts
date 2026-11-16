@@ -52,7 +52,27 @@ let activeTarget: ModelTarget = urlState.target ?? { kind: 'city', geonameId: DE
 let activeJobId: string | null = null;
 let loadToken = 0;
 let skyToken = 0;
-let modelByKey = new Map<string, CityModel>();
+const MODEL_CACHE_LIMIT = 4;
+const modelByKey = new Map<string, CityModel>();
+
+function rememberModel(model: CityModel): void {
+  modelByKey.delete(model.key);
+  modelByKey.set(model.key, model);
+  while (modelByKey.size > MODEL_CACHE_LIMIT) {
+    const oldest = modelByKey.keys().next().value;
+    if (oldest === undefined) break;
+    modelByKey.delete(oldest);
+  }
+}
+
+function recallModel(key: string): CityModel | undefined {
+  const model = modelByKey.get(key);
+  if (model) {
+    modelByKey.delete(key);
+    modelByKey.set(key, model);
+  }
+  return model;
+}
 let skyCache = new Map<string, SkyDay>();
 let labelHint: string | null = null;
 let userTouchedTime = urlState.date !== null || urlState.minute !== null;
@@ -176,7 +196,7 @@ async function applySky(date: string, token: number): Promise<void> {
 
 async function applyModel(model: CityModel, token: number): Promise<void> {
   if (token !== loadToken) return;
-  modelByKey.set(model.key, model);
+  rememberModel(model);
   const tz = model.city.tz;
   const state = store.getState();
   const date = explicitDate && isValidDateString(explicitDate) ? clampDate(explicitDate) : todayInTimezone(tz);
@@ -232,7 +252,7 @@ async function loadCity(target: ModelTarget, label?: string | null): Promise<voi
     if (token !== loadToken) return;
     if (created.state === 'ready') {
       store.setState({ phase: 'loading' });
-      const model = modelByKey.get(created.key) ?? (await api.loadModel(created.key));
+      const model = recallModel(created.key) ?? (await api.loadModel(created.key));
       await applyModel(model, token);
       return;
     }

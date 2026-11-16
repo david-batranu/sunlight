@@ -202,11 +202,13 @@ export function shadowMultiplier(altitudeDeg: number): number | null {
 
 export function sunLightLabel(
   altitude: number,
-  sun: SkyDay['sun'] | null
+  sun: SkyDay['sun'] | null,
+  moonAltitude = -90
 ): string {
-  if (altitude < -18) return 'Night';
-  if (altitude < -12) return 'Astronomical twilight';
-  if (altitude < -6) return 'Nautical twilight';
+  const moonUp = moonAltitude > 5;
+  if (altitude < -18) return moonUp ? 'Moonlight' : 'Night';
+  if (altitude < -12) return moonUp ? 'Moonlit night' : 'Astronomical twilight';
+  if (altitude < -6) return moonUp ? 'Moonlit twilight' : 'Nautical twilight';
   if (altitude < -0.833) return 'Civil twilight';
   if (altitude < 6) {
     const evening = sun?.set != null;

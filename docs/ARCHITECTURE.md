@@ -83,7 +83,7 @@ Progress is monotonic and coarse-grained (`fetch`, `parse`, `build`, `write`) wi
 | Seed | Bundled | Eight baked Romanian city cores, verified by manifest SHA-256; also the fallback for seed-city generation failures. |
 | Fixture | Tests/dev | Deterministic local raw-city fixture; no network. Selected with `CITY_SOURCE=fixture`. |
 
-Raw provider responses are cached gzipped for 30 days, which makes retries cheap and reduces load on public OSM infrastructure.
+Provider responses are not persisted between attempts in v1 (a failed generation refetches); the model cache and bundled seeds keep repeat load off the public OSM infrastructure.
 
 ### 4.2 Normalization
 
@@ -91,7 +91,7 @@ Raw provider responses are cached gzipped for 30 days, which makes retries cheap
 - **Roads**: motorway through living street/pedestrian, skipping tunnels; bridges stay at ground level in the diorama; service roads only when named.
 - **Areas**: water, reservoir/riverbank, parks, grass, forest, plazas.
 - **Rail**: surface railway lines rendered as thin tracks.
-- Relations are assembled from member ways by role; incomplete geometries are dropped rather than guessed.
+- Relations are assembled from member ways by role; incomplete geometries are dropped rather than guessed. Courtyard holes in building relations are ignored (with a model warning) to keep the low-poly extrusion simple.
 
 ### 4.3 Projection and geometry
 
@@ -137,14 +137,14 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 
 - Units: decimetres; the renderer divides by 10.
 - Key: `<city-or-point>-r<radius>-v<model version>`.
-- Metadata includes source, stats, warnings, attribution and generation timings.
+- Metadata includes source, stats, warnings and attribution. `bounds` are the actual geometry extents (≤ the requested radius), not a fixed square.
 - Strong ETag (SHA-256) + immutable cache headers; version bumps invalidate naturally.
 
 ## 6. Cache and jobs
 
 - **Model cache**: atomic temp-file → rename writes, sidecar meta, ETag, startup corruption scan, LRU eviction above `CACHE_MAX_MB`.
 - **Hot cache**: recent model buffers/sky payloads are kept in memory.
-- **Raw cache**: provider tile/query responses with TTL.
+- **Provider cache**: not implemented in v1 — generated models are cached, upstream responses are not.
 - **Seeds**: bundled, SHA-verified, read-only; served before cache/generation.
 - **Jobs**: in-memory FIFO queue, one worker by default, dedupe by key, monotonic progress, cancellation, TTL cleanup. A finished job writes the model; after a restart the cache still serves it.
 - **Versioning**: `MODEL_VERSION` in `shared/constants.ts`; bump + `npm run cache:clear` for format changes.

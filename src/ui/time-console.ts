@@ -114,6 +114,7 @@ export function createTimeConsole(ctx: UIContext, callbacks: TimeConsoleCallback
     </div>
   `
   );
+  element.setAttribute('aria-label', 'Time and date controls');
 
   const clock = q<HTMLElement>(element, '[data-testid="time-readout"]');
   const dateReadout = q<HTMLElement>(element, '[data-testid="date-readout"]');
@@ -207,7 +208,7 @@ export function createTimeConsole(ctx: UIContext, callbacks: TimeConsoleCallback
     patcher.value(dateInput, state.date);
     if (!scrubbing) patcher.value(slider, String(Math.max(0, Math.min(1439, roundedMinute))));
 
-    const qualityLabel = light ? sunLightLabel(light.sunAlt, state.sky?.sun ?? null) : '—';
+    const qualityLabel = light ? sunLightLabel(light.sunAlt, state.sky?.sun ?? null, light.moonAlt) : '—';
     patcher.text(quality, qualityLabel);
     patcher.attr(
       slider,

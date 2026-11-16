@@ -164,6 +164,7 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
   );
 
   element.dataset.testid = 'light-panel';
+  element.setAttribute('aria-label', 'Sun and moon light');
 
   const scrim = el('div', 'sl-sheet-scrim');
   scrim.hidden = true;
@@ -330,7 +331,7 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
     const sky = state.sky;
     updateCompass(sky);
 
-    const label = light ? sunLightLabel(light.sunAlt, sky?.sun ?? null) : 'No sky data';
+    const label = light ? sunLightLabel(light.sunAlt, sky?.sun ?? null, light.moonAlt) : 'No sky data';
     patcher.text(lightLabel, label);
     if (mood !== lastMood) {
       lastMood = mood;

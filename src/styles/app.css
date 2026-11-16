@@ -1,3 +1,25 @@
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--cream-50);
+  color: var(--ink-900);
+  font: 600 13px/1.2 var(--font-ui);
+  text-decoration: none;
+  box-shadow: var(--shadow-panel);
+  transform: translateY(-200%);
+  transition: transform 0.15s ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 2px solid var(--terra-500);
+  outline-offset: 2px;
+}
+
 /* ==================================================================
    Sunlight — UI components: top bar, time console, light panel,
    search, about, overlays and notices. Warm museum-placard language.
