@@ -36,6 +36,7 @@ import { CITY_RADIUS_M, MODEL_VERSION, OSM_ATTRIBUTION, SEED_CITIES } from '../s
 import { loadConfig } from '../server/config.ts';
 import { buildCityModel } from '../server/city/build.ts';
 import { atomicWriteFile } from '../server/city/fs-atomic.ts';
+import { fetchTerrain } from '../server/city/elevation.ts';
 import { cityModelKey } from '../server/city/keys.ts';
 import { sha256Hex } from '../server/city/model-io.ts';
 import { createProviderChain } from '../server/city/providers/chain.ts';
@@ -201,6 +202,26 @@ async function bakeCity(city, context) {
       `    raw data: ${raw.ways.length} ways, ${raw.relations.length} relations (source: ${raw.source})`
     );
 
+    let terrain = null;
+    const warnings = [...raw.warnings];
+    try {
+      console.log('  sampling elevation (AWS Terrain Tiles) ...');
+      terrain = await fetchTerrain({
+        centerLat: city.lat,
+        centerLon: city.lon,
+        radiusM,
+        signal: controller.signal
+      });
+      console.log(
+        `    terrain: ${terrain.cols}×${terrain.rows} samples, ${terrain.baseM} m base, ` +
+          `${Math.max(...terrain.h) / 10} m relief`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      warnings.push(`terrain unavailable: ${message}`);
+      console.warn(`    WARNING: terrain unavailable (${message}); baking a flat model`);
+    }
+
     const model = buildCityModel(raw, {
       key,
       city: {
@@ -219,7 +240,8 @@ async function bakeCity(city, context) {
       seed: true,
       generatedAt,
       attribution: OSM_ATTRIBUTION,
-      warnings: raw.warnings
+      warnings,
+      terrain
     });
 
     const json = Buffer.from(JSON.stringify(model), 'utf8');

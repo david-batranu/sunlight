@@ -10,6 +10,12 @@
  */
 
 import type { CityModel } from '../../shared/types.ts';
+import {
+  isValidTerrain,
+  terrainExtentDm,
+  terrainHeightM,
+  terrainMaxHeightDm
+} from '../../shared/terrain.ts';
 
 const DECIMETRES_PER_METRE = 10;
 
@@ -109,6 +115,15 @@ export function modelExtentsFor(model: CityModel | null): ModelExtents {
     for (let i = 0; i + 1 < ring.length; i += 2) consumePoint(ring[i], ring[i + 1]);
   };
 
+  const terrain = isValidTerrain(model.terrain) ? model.terrain : null;
+  if (terrain) {
+    const extent = terrainExtentDm(terrain);
+    consumePoint(extent.minX, extent.minZ);
+    consumePoint(extent.maxX, extent.maxZ);
+    const terrainHeight = terrainMaxHeightDm(terrain) / DECIMETRES_PER_METRE;
+    if (terrainHeight > maxHeightM) maxHeightM = terrainHeight;
+  }
+
   const bounds = model.bounds;
   if (bounds) {
     consumePoint(finiteOr(bounds.minX, 0), finiteOr(bounds.minZ, 0));
@@ -120,7 +135,20 @@ export function modelExtentsFor(model: CityModel | null): ModelExtents {
   for (const building of model.buildings ?? []) {
     consumeRing(building.p);
     const height = finiteOr(building.h, 0) / DECIMETRES_PER_METRE;
-    if (height > maxHeightM) maxHeightM = height;
+    let ground = 0;
+    if (terrain && building.p.length >= 2) {
+      let sumX = 0;
+      let sumZ = 0;
+      let count = 0;
+      for (let i = 0; i + 1 < building.p.length; i += 2) {
+        sumX += building.p[i] / DECIMETRES_PER_METRE;
+        sumZ += building.p[i + 1] / DECIMETRES_PER_METRE;
+        count += 1;
+      }
+      if (count > 0) ground = terrainHeightM(terrain, sumX / count, sumZ / count);
+    }
+    const top = ground + height;
+    if (top > maxHeightM) maxHeightM = top;
   }
   for (const road of model.roads ?? []) consumeRing(road.p);
   for (const area of model.areas ?? []) {

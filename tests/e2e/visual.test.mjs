@@ -130,7 +130,7 @@ test('performance smoke at 1440x900 (SwiftShader): merged draw calls, triangles,
     t.diagnostic(
       `render: drawCalls=${debug.render.drawCalls} triangles=${debug.render.triangles} fps=${debug.render.fps.toFixed(1)}`
     );
-    t.diagnostic(`model: ${debug.modelKey} buildings=${state.stats?.buildings ?? '?'} radius=${state.radiusM ?? '?'} m, phase=${state.phase}`);
+    t.diagnostic(`model: ${debug.modelKey} buildings=${state.stats?.buildings ?? '?'} radius=${state.radiusM ?? '?'} m terrain=${state.terrain ? state.terrain.maxReliefM + ' m' : 'flat'}, phase=${state.phase}`);
     t.diagnostic(
       `camera: az=${debug.camera.azimuthDeg.toFixed(1)}° pitch=${debug.camera.pitchDeg.toFixed(1)}° zoom=${debug.camera.zoom}`
     );
@@ -138,11 +138,11 @@ test('performance smoke at 1440x900 (SwiftShader): merged draw calls, triangles,
     assert.equal(debug.modelKey, BRASOV.key);
     assert.ok(debug.render.drawCalls > 0);
     assert.ok(
-      debug.render.drawCalls <= 12,
-      `draw calls should be merged (~7), got ${debug.render.drawCalls}`
+      debug.render.drawCalls <= 13,
+      `draw calls should stay merged (~8), got ${debug.render.drawCalls}`
     );
     assert.ok(
-      debug.render.triangles > 250_000 && debug.render.triangles < 700_000,
+      debug.render.triangles > 250_000 && debug.render.triangles < 750_000,
       `expected the wide city mesh (250k–700k triangles), got ${debug.render.triangles}`
     );
     // FPS is reported raw: SwiftShader is far slower than a real GPU.

@@ -432,6 +432,8 @@ test('wide model: 1500 m city, named landmarks and a camera-following compass', 
     assert.ok((state.stats?.buildings ?? 0) > 5000, `expected a wide city, got ${state.stats?.buildings}`);
     assert.ok(state.namedBuildings > 50, `expected named landmarks, got ${state.namedBuildings}`);
     assert.ok(state.namedRoads > 100, `expected named roads, got ${state.namedRoads}`);
+    assert.ok(state.terrain, 'Brașov must carry an elevation heightfield');
+    assert.ok(state.terrain.maxReliefM > 60, `expected real relief, got ${state.terrain.maxReliefM} m`);
 
     const compass = page.locator('[data-testid="compass"]');
     await compass.waitFor({ state: 'visible' });

@@ -148,6 +148,28 @@ export function validateCityModel(value: unknown): CityModel {
     if (!isFiniteNumber(bounds[field])) fail(`bounds.${field} must be a number`);
   }
 
+  if (value.terrain !== undefined) {
+    const terrain = value.terrain;
+    if (!isRecord(terrain)) fail('terrain must be an object');
+    for (const field of ['x0', 'z0', 'step', 'baseM']) {
+      if (!isFiniteNumber(terrain[field])) fail(`terrain.${field} must be a finite number`);
+    }
+    if ((terrain.step as number) <= 0) fail('terrain.step must be positive');
+    for (const field of ['cols', 'rows']) {
+      if (!isInteger(terrain[field]) || (terrain[field] as number) < 2 || (terrain[field] as number) > 1024) {
+        fail(`terrain.${field} must be an integer between 2 and 1024`);
+      }
+    }
+    const count = (terrain.cols as number) * (terrain.rows as number);
+    if (!Array.isArray(terrain.h) || terrain.h.length !== count) fail('terrain.h must have cols × rows entries');
+    for (const height of terrain.h) {
+      if (!isInteger(height) || (height as number) < 0 || (height as number) > 100_000) {
+        fail('terrain.h entries must be non-negative integer decimetres');
+      }
+    }
+    if (terrain.source !== undefined && typeof terrain.source !== 'string') fail('terrain.source must be a string');
+  }
+
   if (!Array.isArray(value.buildings)) fail('buildings must be an array');
   for (const building of value.buildings) {
     if (!isRecord(building)) fail('building must be an object');

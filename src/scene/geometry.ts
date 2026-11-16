@@ -12,7 +12,12 @@
  */
 
 import earcut from 'earcut';
-import type { CityModel } from '../../shared/types.ts';
+import type { CityModel, TerrainRecord } from '../../shared/types.ts';
+import {
+  isValidTerrain,
+  terrainHeightM,
+  terrainMaxHeightDm
+} from '../../shared/terrain.ts';
 import { lightenRgb, mixRgb, scaleRgb, writeLinearColor, type RGB } from './color.ts';
 import {
   plinthProfile,
@@ -26,6 +31,7 @@ const EPSILON = 1e-6;
 
 /** Half a metre above the ground plate, then feature-class lift layers. */
 export const ROAD_LIFT_M = 0.42;
+export const TERRAIN_LIFT_M = 0.05;
 export const AREA_LIFT_M: Readonly<Record<number, number>> = {
   1: 0.16, // water
   2: 0.26, // park
@@ -103,6 +109,12 @@ const AREA_COLORS: Readonly<Record<number, RGB>> = {
   3: [0.36, 0.45, 0.32], // forest
   4: [0.62, 0.66, 0.5] // grass / plaza
 };
+
+const TERRAIN_LOW: RGB = [0.62, 0.6, 0.46];
+const TERRAIN_MID: RGB = [0.44, 0.51, 0.36];
+const TERRAIN_HIGH: RGB = [0.56, 0.54, 0.49];
+const TERRAIN_SOIL_TOP: RGB = [0.58, 0.45, 0.32];
+const TERRAIN_SOIL_BOTTOM: RGB = [0.4, 0.28, 0.19];
 
 /** Deterministic per-building palette (also unit-tested). */
 export function buildingColor(
@@ -402,6 +414,92 @@ export function pointInRing(x: number, z: number, ring: readonly number[]): bool
 }
 
 /* ------------------------------------------------------------------ */
+/* Terrain heightfield                                                */
+/* ------------------------------------------------------------------ */
+
+function terrainColor(heightM: number, maxHeightM: number, variation: number): RGB {
+  const t = maxHeightM > 0.5 ? Math.max(0, Math.min(1, heightM / maxHeightM)) : 0;
+  const base =
+    t <= 0.5
+      ? mixRgb(TERRAIN_LOW, TERRAIN_MID, t * 2)
+      : mixRgb(TERRAIN_MID, TERRAIN_HIGH, (t - 0.5) * 2);
+  return scaleRgb(base, 0.94 + 0.1 * Math.max(0, Math.min(1, variation)));
+}
+
+/**
+ * Builds the terrain heightfield mesh plus perimeter skirt walls.
+ * Returns empty buffers when the model has no usable terrain.
+ */
+export function buildTerrain(model: CityModel | null): MeshBuffers {
+  const terrain = model?.terrain;
+  if (!isValidTerrain(terrain)) return emptyBuffers();
+
+  const builder = new MeshBuilder(12288);
+  builder.setFeature(-1);
+  const cols = terrain.cols;
+  const rows = terrain.rows;
+  const x0 = terrain.x0 / DM_PER_M;
+  const z0 = terrain.z0 / DM_PER_M;
+  const step = terrain.step / DM_PER_M;
+  const maxHeightM = terrainMaxHeightDm(terrain) / DM_PER_M;
+  const heightAt = (col: number, row: number): number =>
+    terrain.h[row * cols + col] / DM_PER_M + TERRAIN_LIFT_M;
+
+  for (let row = 0; row + 1 < rows; row += 1) {
+    const za = z0 + row * step;
+    const zb = za + step;
+    for (let col = 0; col + 1 < cols; col += 1) {
+      const xa = x0 + col * step;
+      const xb = xa + step;
+      const h00 = heightAt(col, row);
+      const h10 = heightAt(col + 1, row);
+      const h01 = heightAt(col, row + 1);
+      const h11 = heightAt(col + 1, row + 1);
+      const variance = hashUnit(row * 92821 + col * 68917 + 7);
+      const colorA = terrainColor((h00 + h10 + h11) / 3, maxHeightM, variance);
+      const colorB = terrainColor((h00 + h11 + h01) / 3, maxHeightM, hashUnit(variance * 9973));
+      builder.tri(xa, h00, za, xb, h10, za, xb, h11, zb, colorA, 0, 1, 0);
+      builder.tri(xa, h00, za, xb, h11, zb, xa, h01, zb, colorB, 0, 1, 0);
+    }
+  }
+
+  // Perimeter skirt: hides the open underside when terrain is elevated at
+  // the model edge (common for hill towns).
+  const pushSkirt = (
+    ax: number, az: number, ah: number,
+    bx: number, bz: number, bh: number,
+    nx: number, nz: number
+  ): void => {
+    if (ah < 0.02 && bh < 0.02) return;
+    builder.quad(
+      ax, 0, az,
+      bx, 0, bz,
+      bx, bh, bz,
+      ax, ah, az,
+      TERRAIN_SOIL_BOTTOM,
+      nx, 0, nz,
+      TERRAIN_SOIL_TOP
+    );
+  };
+  for (let col = 0; col + 1 < cols; col += 1) {
+    const xa = x0 + col * step;
+    const xb = xa + step;
+    pushSkirt(xa, z0, heightAt(col, 0), xb, z0, heightAt(col + 1, 0), 0, -1);
+    const zs = z0 + (rows - 1) * step;
+    pushSkirt(xa, zs, heightAt(col, rows - 1), xb, zs, heightAt(col + 1, rows - 1), 0, 1);
+  }
+  for (let row = 0; row + 1 < rows; row += 1) {
+    const za = z0 + row * step;
+    const zb = za + step;
+    pushSkirt(x0, za, heightAt(0, row), x0, zb, heightAt(0, row + 1), -1, 0);
+    const xe = x0 + (cols - 1) * step;
+    pushSkirt(xe, za, heightAt(cols - 1, row), xe, zb, heightAt(cols - 1, row + 1), 1, 0);
+  }
+
+  return builder.finish();
+}
+
+/* ------------------------------------------------------------------ */
 /* Buildings                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -486,6 +584,7 @@ function pushGableRoof(
 
 export function buildBuildings(model: CityModel): MeshBuffers {
   const builder = new MeshBuilder(16384);
+  const terrain = isValidTerrain(model.terrain) ? model.terrain : null;
   const ring: Ring2D = { xs: [], zs: [] };
   const flat: number[] = [];
   const buildings = model.buildings ?? [];
@@ -498,6 +597,18 @@ export function buildBuildings(model: CityModel): MeshBuffers {
     if (Math.abs(area2) < 2) continue; // footprint smaller than ~1 m²
 
     const height = Math.max(0.8, (Number.isFinite(building.h) ? building.h : 0) / DM_PER_M);
+    let groundY = 0;
+    if (terrain) {
+      let sumX = 0;
+      let sumZ = 0;
+      for (let i = 0; i < count; i += 1) {
+        sumX += ring.xs[i];
+        sumZ += ring.zs[i];
+      }
+      groundY = terrainHeightM(terrain, sumX / count, sumZ / count);
+    }
+    const wallTop = groundY + height;
+    const baseBottom = terrain ? groundY - 0.6 : 0;
     const variation = hashUnit(index * 2 + 17);
     const wallColor = buildingColor(building.t ?? 0, building.h ?? 0, variation);
     const roofColor = roofColorFor(hashUnit(index * 3 + 29));
@@ -516,10 +627,10 @@ export function buildBuildings(model: CityModel): MeshBuffers {
       const nx = (orientation * dz) / length;
       const nz = (-orientation * dx) / length;
       builder.quad(
-        ax, 0, az,
-        bx, 0, bz,
-        bx, height, bz,
-        ax, height, az,
+        ax, baseBottom, az,
+        bx, baseBottom, bz,
+        bx, wallTop, bz,
+        ax, wallTop, az,
         wallColor, nx, 0, nz
       );
     }
@@ -528,7 +639,7 @@ export function buildBuildings(model: CityModel): MeshBuffers {
       building.r === 1 && count === 4 && (building.h ?? 0) <= 300 && Math.abs(area2) > 12;
 
     if (roofEligible) {
-      pushGableRoof(builder, ring, height, roofColor, wallColor);
+      pushGableRoof(builder, ring, wallTop, roofColor, wallColor);
     } else {
       flat.length = 0;
       for (let i = 0; i < count; i += 1) {
@@ -549,14 +660,14 @@ export function buildBuildings(model: CityModel): MeshBuffers {
           ring.xs[i0], ring.zs[i0],
           ring.xs[i1], ring.zs[i1],
           ring.xs[i2], ring.zs[i2],
-          height,
+          wallTop,
           capColor
         );
       }
     }
 
-    // Sink the footprint a touch below the ground plate to hide seams.
-    // (Walls start at y = 0 exactly; the plinth top face overlaps them.)
+    // Sink the footprint slightly below the sampled ground to hide seams on
+    // slopes; on flat models this is hidden by the plinth top.
   }
   return builder.finish();
 }
@@ -567,6 +678,7 @@ export function buildBuildings(model: CityModel): MeshBuffers {
 
 export function buildRoads(model: CityModel): MeshBuffers {
   const builder = new MeshBuilder(8192);
+  const terrain = isValidTerrain(model.terrain) ? model.terrain : null;
   const ring: Ring2D = { xs: [], zs: [] };
   const roads = model.roads ?? [];
   for (let index = 0; index < roads.length; index += 1) {
@@ -577,7 +689,9 @@ export function buildRoads(model: CityModel): MeshBuffers {
     const width = ROAD_WIDTH_M[road.c] ?? 7;
     const half = width / 2;
     const color = roadColorFor(road.c, hashUnit(index * 5 + 101));
-    const y = ROAD_LIFT_M + (road.c === 9 ? -0.03 : 0);
+    const lift = ROAD_LIFT_M + (road.c === 9 ? -0.03 : 0);
+    const groundAt = (x: number, z: number): number =>
+      lift + (terrain ? terrainHeightM(terrain, x, z) : 0);
 
     for (let i = 0; i + 1 < count; i += 1) {
       const ax = ring.xs[i];
@@ -590,12 +704,12 @@ export function buildRoads(model: CityModel): MeshBuffers {
       if (length < 0.2) continue;
       const nx = (-dz / length) * half;
       const nz = (dx / length) * half;
-      // Quad a-left, b-left, b-right, a-right (up-facing).
+      // Quad a-left, b-left, b-right, a-right (draped over terrain).
       builder.quad(
-        ax + nx, y, az + nz,
-        bx + nx, y, bz + nz,
-        bx - nx, y, bz - nz,
-        ax - nx, y, az - nz,
+        ax + nx, groundAt(ax + nx, az + nz), az + nz,
+        bx + nx, groundAt(bx + nx, bz + nz), bz + nz,
+        bx - nx, groundAt(bx - nx, bz - nz), bz - nz,
+        ax - nx, groundAt(ax - nx, az - nz), az - nz,
         color, 0, 1, 0
       );
     }
@@ -609,10 +723,10 @@ export function buildRoads(model: CityModel): MeshBuffers {
         const z = ring.zs[i];
         const e = half * 0.62;
         builder.quad(
-          x - e, y, z - e,
-          x + e, y, z - e,
-          x + e, y, z + e,
-          x - e, y, z + e,
+          x - e, groundAt(x - e, z - e), z - e,
+          x + e, groundAt(x + e, z - e), z - e,
+          x + e, groundAt(x + e, z + e), z + e,
+          x - e, groundAt(x - e, z + e), z + e,
           color, 0, 1, 0
         );
       }
@@ -627,6 +741,7 @@ export function buildRoads(model: CityModel): MeshBuffers {
 
 export function buildAreas(model: CityModel): MeshBuffers {
   const builder = new MeshBuilder(8192);
+  const terrain = isValidTerrain(model.terrain) ? model.terrain : null;
   const flat: number[] = [];
   const holeIndices: number[] = [];
   const areas = model.areas ?? [];
@@ -671,18 +786,57 @@ export function buildAreas(model: CityModel): MeshBuffers {
       continue;
     }
     const kind = area.k ?? 4;
-    const lift = AREA_LIFT_M[kind] ?? 0.22;
+    // Keep draped areas below the road layer (roads stay readable on slopes).
+    const lift = (AREA_LIFT_M[kind] ?? 0.22) + (terrain ? 0.06 : 0);
     const color = areaColorFor(kind, hashUnit(index * 7 + 211));
+    let emitted = 0;
+
+    const pushTriangle = (
+      ax: number, az: number,
+      bx: number, bz: number,
+      cx: number, cz: number,
+      depth: number
+    ): void => {
+      if (!terrain) {
+        builder.triUp(ax, az, bx, bz, cx, cz, lift, color);
+        return;
+      }
+      const ya = terrainHeightM(terrain, ax, az) + lift;
+      const yb = terrainHeightM(terrain, bx, bz) + lift;
+      const yc = terrainHeightM(terrain, cx, cz) + lift;
+      const ab = Math.hypot(bx - ax, bz - az);
+      const bc = Math.hypot(cx - bx, cz - bz);
+      const ca = Math.hypot(ax - cx, az - cz);
+      const maxEdge = Math.max(ab, bc, ca);
+      const centerY = terrainHeightM(terrain, (ax + bx + cx) / 3, (az + bz + cz) / 3) + lift;
+      const linearY = (ya + yb + yc) / 3;
+      const error = Math.abs(centerY - linearY);
+      if ((maxEdge > 22 || error > 0.12) && depth < 6 && emitted < 3000) {
+        const mabx = (ax + bx) / 2;
+        const mabz = (az + bz) / 2;
+        const mbcx = (bx + cx) / 2;
+        const mbcz = (bz + cz) / 2;
+        const mcax = (cx + ax) / 2;
+        const mcaz = (cz + az) / 2;
+        pushTriangle(ax, az, mabx, mabz, mcax, mcaz, depth + 1);
+        pushTriangle(mabx, mabz, bx, bz, mbcx, mbcz, depth + 1);
+        pushTriangle(mcax, mcaz, mbcx, mbcz, cx, cz, depth + 1);
+        pushTriangle(mabx, mabz, mbcx, mbcz, mcax, mcaz, depth + 1);
+        return;
+      }
+      builder.tri(ax, ya, az, bx, yb, bz, cx, yc, cz, color, 0, 1, 0);
+      emitted += 1;
+    };
+
     for (let t = 0; t + 2 < triangles.length; t += 3) {
       const i0 = triangles[t];
       const i1 = triangles[t + 1];
       const i2 = triangles[t + 2];
-      builder.triUp(
+      pushTriangle(
         flat[i0 * 2], flat[i0 * 2 + 1],
         flat[i1 * 2], flat[i1 * 2 + 1],
         flat[i2 * 2], flat[i2 * 2 + 1],
-        lift,
-        color
+        0
       );
     }
   }
@@ -846,7 +1000,7 @@ export function sampleTreeSites(model: CityModel): TreeSite[] {
         sites.push({
           x,
           z,
-          baseY: lift,
+          baseY: lift + (isValidTerrain(model.terrain) ? terrainHeightM(model.terrain, x, z) : 0),
           height: 6.5 + jitterA * 6,
           radius: 2.3 + jitterB * 1.5,
           colorIndex: Math.floor(colorJitter * TREE_COLORS.length)
@@ -902,6 +1056,7 @@ export function buildTrees(sites: readonly TreeSite[]): MeshBuffers {
 /** Convenience for placing a model: all merged buffers in one call. */
 export interface ModelBuffers {
   plinth: MeshBuffers;
+  terrain: MeshBuffers;
   buildings: MeshBuffers;
   roads: MeshBuffers;
   areas: MeshBuffers;
@@ -913,6 +1068,7 @@ export function buildModelBuffers(model: CityModel | null, extents: ModelExtents
   if (!model) {
     return {
       plinth: buildPlinth(extents),
+      terrain: emptyBuffers(),
       buildings: emptyBuffers(),
       roads: emptyBuffers(),
       areas: emptyBuffers(),
@@ -923,6 +1079,7 @@ export function buildModelBuffers(model: CityModel | null, extents: ModelExtents
   const treeSites = sampleTreeSites(model);
   return {
     plinth: buildPlinth(extents),
+    terrain: buildTerrain(model),
     buildings: buildBuildings(model),
     roads: buildRoads(model),
     areas: buildAreas(model),

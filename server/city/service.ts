@@ -42,6 +42,7 @@ import { CityError, isAbortError, isCityError, type CityErrorStatus } from './er
 import { JobQueue, type JobContext } from './job-queue.ts';
 import { cityModelKey, formatCoordinate, isValidModelKey, pointModelKey } from './keys.ts';
 import { log } from './logger.ts';
+import { fetchTerrain } from './elevation.ts';
 import { ModelCache, type CachedModel } from './model-cache.ts';
 import { gzipModel, modelEtag } from './model-io.ts';
 import type { RawOsmData } from './raw.ts';
@@ -381,6 +382,25 @@ class CityServiceImpl implements CityService {
         }
       });
 
+      const warnings = [...raw.warnings];
+      let terrain = null;
+      if (raw.source !== 'fixture') {
+        context.report('fetch', 58, 'Sampling elevation');
+        try {
+          terrain = await fetchTerrain({
+            centerLat: center.lat,
+            centerLon: center.lon,
+            radiusM: this.radiusM,
+            signal: deadline.signal
+          });
+        } catch (error) {
+          if (isAbortError(error) || deadline.signal.aborted) throw error;
+          const message = error instanceof Error ? error.message : String(error);
+          warnings.push(`terrain unavailable: ${message}`);
+          log.warn(`terrain unavailable for ${resolved.key}: ${message}`);
+        }
+      }
+
       context.report('build', 62, 'Generating city model', `${raw.ways.length} ways`);
       const input: BuildInput = {
         key: resolved.key,
@@ -392,7 +412,8 @@ class CityServiceImpl implements CityService {
         source: raw.source,
         seed: false,
         generatedAt: new Date().toISOString(),
-        warnings: raw.warnings
+        warnings,
+        terrain
       };
 
       const artifact = await this.buildModel(raw, input, context, deadline.signal);

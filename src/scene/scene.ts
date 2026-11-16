@@ -166,6 +166,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let halfHeight = 900;
   let aspect = 1;
   let viewportHeight = 800;
+  let terrainMesh: THREE.Mesh | null = null;
   let treesMesh: THREE.Mesh | null = null;
   let buildingsMesh: THREE.Mesh | null = null;
   let roadsMesh: THREE.Mesh | null = null;
@@ -237,6 +238,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
       mesh.geometry?.dispose();
     }
     modelRoot.clear();
+    terrainMesh = null;
     treesMesh = null;
     buildingsMesh = null;
     roadsMesh = null;
@@ -455,6 +457,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     currentModel = model;
     const buffers = buildModelBuffers(model, extents);
     addMesh(buffers.plinth, false, true);
+    terrainMesh = addMesh(buffers.terrain, true, true);
     buildingsMesh = addMesh(buffers.buildings, true, true);
     roadsMesh = addMesh(buffers.roads, false, true);
     areasMesh = addMesh(buffers.areas, false, true);

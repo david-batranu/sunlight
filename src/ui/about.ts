@@ -5,7 +5,7 @@
 
 import type { UIContext } from '../app/contracts.ts';
 import type { AppState } from '../app/state.ts';
-import { GEONAMES_ATTRIBUTION, OSM_ATTRIBUTION } from '../../shared/constants.ts';
+import { GEONAMES_ATTRIBUTION, OSM_ATTRIBUTION, TERRAIN_ATTRIBUTION } from '../../shared/constants.ts';
 import { SHORTCUT_TABLE } from './shortcuts.ts';
 import { el, on, q, trapFocus } from './dom.ts';
 import { icon } from './icons.ts';
@@ -65,6 +65,7 @@ export function createAboutDialog(ctx: UIContext, callbacks: AboutDialogCallback
           <h3>Data &amp; attribution</h3>
           <ul class="sl-attrib-list">
             <li><strong>City geometry</strong> — ${OSM_ATTRIBUTION}. Buildings, roads, water, parks and rail are derived from OpenStreetMap data.</li>
+            <li><strong>Elevation</strong> — ${TERRAIN_ATTRIBUTION} (Mapzen terrain tiles, derived from SRTM and other public DEMs).</li>
             <li><strong>City index</strong> — ${GEONAMES_ATTRIBUTION}. Search covers populated places from the GeoNames cities5000 index.</li>
             <li><strong>Sun &amp; moon</strong> — altazimuth positions from standard astronomical ephemerides, sampled every five minutes of city-local wall-clock time.</li>
             <li><strong>Timezone</strong> — times are shown in the city's IANA timezone with a 24-hour clock; distances are metric (metres and kilometres).</li>

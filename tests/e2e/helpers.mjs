@@ -18,8 +18,8 @@ export const CHROME_PATH =
 export const DESKTOP = { width: 1440, height: 900 };
 export const MOBILE = { width: 390, height: 844 };
 
-export const BRASOV = { geonameId: 683844, name: 'Brașov', key: 'gn-683844-r1500-v2' };
-export const CLUJ = { geonameId: 681290, name: 'Cluj-Napoca', key: 'gn-681290-r1500-v2' };
+export const BRASOV = { geonameId: 683844, name: 'Brașov', key: 'gn-683844-r1500-v3' };
+export const CLUJ = { geonameId: 681290, name: 'Cluj-Napoca', key: 'gn-681290-r1500-v3' };
 /** Brașov city centre (GeoNames) for the geolocation stub. */
 export const BRASOV_COORDS = { latitude: 45.64861, longitude: 25.60613 };
 
@@ -109,6 +109,14 @@ export async function readState(page) {
       current: state.current,
       modelKey: state.model?.key ?? null,
       radiusM: state.model?.meta?.radiusM ?? null,
+      terrain: state.model?.terrain
+        ? {
+            cols: state.model.terrain.cols,
+            rows: state.model.terrain.rows,
+            baseM: state.model.terrain.baseM,
+            maxReliefM: Math.max(...state.model.terrain.h) / 10
+          }
+        : null,
       stats: state.model?.meta?.stats ?? null,
       namedBuildings: state.model?.buildings?.filter((building) => !!building.n).length ?? 0,
       namedRoads: state.model?.roads?.filter((road) => !!road.n).length ?? 0,

@@ -7,7 +7,8 @@
  * fallback) and is also reused by `scripts/bake-seeds.mjs`.
  */
 
-import { MAX_BUILDINGS, OSM_ATTRIBUTION } from '../../shared/constants.ts';
+import { MAX_BUILDINGS, OSM_ATTRIBUTION, TERRAIN_ATTRIBUTION } from '../../shared/constants.ts';
+import { isValidTerrain, terrainExtentDm, terrainHeightDm } from '../../shared/terrain.ts';
 import type {
   AreaRecord,
   BuildingRecord,
@@ -17,7 +18,8 @@ import type {
   CitySource,
   ModelBounds,
   ModelMeta,
-  RoadRecord
+  RoadRecord,
+  TerrainRecord
 } from '../../shared/types.ts';
 import {
   classifyArea,
@@ -100,6 +102,8 @@ export interface BuildInput {
   attribution?: string;
   /** Warnings collected by providers (fallbacks etc). */
   warnings?: string[];
+  /** Optional terrain heightfield sampled before the CPU build. */
+  terrain?: TerrainRecord | null;
 }
 
 interface BuildingDraft {
@@ -398,7 +402,11 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
   if (dropped > 0) warnings.push(`capped the model at ${MAX_BUILDINGS} buildings; dropped ${dropped} smallest footprints`);
 
   report(92, 'Assembling model');
-  const bounds = computeBounds(buildings, roads, areas);
+  const terrain = input.terrain && isValidTerrain(input.terrain) ? input.terrain : null;
+  const bounds = computeBounds(buildings, roads, areas, terrain);
+  const attribution = terrain
+    ? `${input.attribution ?? OSM_ATTRIBUTION} · ${TERRAIN_ATTRIBUTION}`
+    : (input.attribution ?? OSM_ATTRIBUTION);
   const meta: ModelMeta = {
     generatedAt: input.generatedAt,
     source: input.source,
@@ -411,7 +419,7 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
       dropped
     },
     warnings: dedupeWarnings(warnings, 24),
-    attribution: input.attribution ?? OSM_ATTRIBUTION
+    attribution
   };
 
   const model: CityModel = {
@@ -422,7 +430,8 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
     bounds,
     buildings,
     roads,
-    areas
+    areas,
+    ...(terrain ? { terrain } : {})
   };
 
   report(100, 'Model built', `${buildings.length} buildings · ${roads.length} roads · ${areas.length} areas`);
@@ -563,7 +572,12 @@ function finalizeAreas(drafts: AreaDraft[]): AreaRecord[] {
   });
 }
 
-function computeBounds(buildings: BuildingRecord[], roads: RoadRecord[], areas: AreaRecord[]): ModelBounds {
+function computeBounds(
+  buildings: BuildingRecord[],
+  roads: RoadRecord[],
+  areas: AreaRecord[],
+  terrain: TerrainRecord | null
+): ModelBounds {
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;
@@ -579,7 +593,16 @@ function computeBounds(buildings: BuildingRecord[], roads: RoadRecord[], areas: 
   };
   for (const building of buildings) {
     include(building.p);
-    if (building.h > maxHeight) maxHeight = building.h;
+    let groundDm = 0;
+    if (terrain) {
+      let maxGroundDm = 0;
+      for (let i = 0; i + 1 < building.p.length; i += 2) {
+        const h = terrainHeightDm(terrain, building.p[i], building.p[i + 1]);
+        if (h > maxGroundDm) maxGroundDm = h;
+      }
+      groundDm = maxGroundDm;
+    }
+    if (groundDm + building.h > maxHeight) maxHeight = groundDm + building.h;
   }
   for (const road of roads) include(road.p);
   for (const area of areas) {
@@ -588,6 +611,14 @@ function computeBounds(buildings: BuildingRecord[], roads: RoadRecord[], areas: 
   }
   if (!Number.isFinite(minX)) {
     throw new CityError('NO_DATA', 'The generated model contains no geometry.', 422, false);
+  }
+  if (terrain) {
+    const extent = terrainExtentDm(terrain);
+    minX = Math.min(minX, extent.minX);
+    maxX = Math.max(maxX, extent.maxX);
+    minZ = Math.min(minZ, extent.minZ);
+    maxZ = Math.max(maxZ, extent.maxZ);
+    maxHeight = Math.max(maxHeight, extent.maxHeight);
   }
   return { minX, maxX, minZ, maxZ, maxHeight };
 }

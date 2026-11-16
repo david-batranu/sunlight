@@ -38,7 +38,7 @@ import type {
 } from '../../shared/types.ts';
 
 export interface ResolvedTarget {
-  key: string;                 // e.g. "gn-683844-r1500-v2"
+  key: string;                 // e.g. "gn-683844-r1500-v3"
   target: ModelTarget;
   city: CityInfo;
   seedSlug: string | null;

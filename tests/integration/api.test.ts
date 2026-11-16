@@ -69,7 +69,7 @@ test('health reports a ready, seed-aware service', async () => {
   assert.equal(response.status, 200);
   const health = await response.json();
   assert.equal(health.ok, true);
-  assert.equal(health.modelVersion, 2);
+  assert.equal(health.modelVersion, 3);
   assert.ok(health.cache);
   assert.ok(Array.isArray(health.seeds.slugs));
 });
@@ -109,7 +109,7 @@ test('generates a model with the fixture provider, then serves it from cache wit
   const etag = first.headers.get('etag');
   assert.ok(etag && etag.length > 4);
   const model = (await first.json()) as CityModel;
-  assert.equal(model.v, 2);
+  assert.equal(model.v, 3);
   assert.equal(model.city.geonameId, 683844);
   assert.ok(model.buildings.length > 0, 'fixture model should contain buildings');
   assert.ok(model.meta.radiusM >= 600);
@@ -188,7 +188,7 @@ test('invalid model targets and missing resources return structured errors', asy
   const unknownJob = await fetch(`${app.url}/api/jobs/does-not-exist`);
   assert.equal(unknownJob.status, 404);
 
-  const unknownModel = await fetch(`${app.url}/api/models/gn-1-r1500-v2`);
+  const unknownModel = await fetch(`${app.url}/api/models/gn-1-r1500-v3`);
   assert.equal(unknownModel.status, 404);
 
   const unknownCity = await postModel({ kind: 'city', geonameId: 999999999 });

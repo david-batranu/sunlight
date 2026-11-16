@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { buildCityModel } from '../../server/city/build.ts';
+import { MODEL_VERSION } from '../../shared/constants.ts';
 import { MAX_NAME_LENGTH, MAX_NAMED_BUILDINGS } from '../../server/city/names.ts';
 import {
   isNamedLandmark,
@@ -308,7 +309,7 @@ test('names keep model bytes deterministic', async () => {
 test('build stays radius-agnostic (600 m and 1500 m both work)', async () => {
   const raw = await loadRawCityFixture();
   const clipped = buildCityModel(raw, fixtureBuildInput({ radiusM: 600, key: 'gn-683844-r600-v2' }));
-  const wide = buildCityModel(raw, fixtureBuildInput({ radiusM: 1500, key: 'gn-683844-r1500-v2' }));
+  const wide = buildCityModel(raw, fixtureBuildInput({ radiusM: 1500, key: 'gn-683844-r1500-v3' }));
 
   assert.equal(clipped.meta.radiusM, 600);
   assert.equal(wide.meta.radiusM, 1500);
@@ -323,5 +324,5 @@ test('build stays radius-agnostic (600 m and 1500 m both work)', async () => {
   assert.ok(clipped.buildings.length < 12, 'the boundary building is clipped away at 600 m');
   assert.equal(wide.buildings.length, 12);
   assert.equal(byName(wide, 'Școala Centrală')?.n, 'Școala Centrală');
-  assert.equal(cityKey(683844), 'gn-683844-r900-v2');
+  assert.equal(cityKey(683844), `gn-683844-r900-v${MODEL_VERSION}`);
 });

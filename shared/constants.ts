@@ -4,7 +4,7 @@
  */
 
 /** Bumped whenever the persisted model schema or generation semantics change. */
-export const MODEL_VERSION = 2;
+export const MODEL_VERSION = 3;
 
 /** Sky payload schema version. */
 export const SKY_VERSION = 1;
@@ -62,3 +62,18 @@ export const SEED_BY_GEONAME_ID: ReadonlyMap<number, SeedCityDefinition> = new M
 export const SEED_BY_SLUG: ReadonlyMap<string, SeedCityDefinition> = new Map(
   SEED_CITIES.map((city) => [city.slug, city])
 );
+
+/* ------------------------------------------------------------------ */
+/* Elevation                                                           */
+/* ------------------------------------------------------------------ */
+
+/** Number of heightfield samples per side (49 × 49 over the model square). */
+export const TERRAIN_GRID_SAMPLES = 49;
+/** Vertical exaggeration for the low-poly diorama. */
+export const TERRAIN_EXAGGERATION = 0.3;
+/** Clamp above the lowest sampled point, keeping extreme alpine cities sane. */
+export const TERRAIN_MAX_REL_M = 160;
+/** Terrarium terrain tile zoom used by the server provider. */
+export const TERRAIN_TILE_ZOOM = 14;
+/** Attribution appended to models that contain elevation data. */
+export const TERRAIN_ATTRIBUTION = 'Elevation: AWS Terrain Tiles';

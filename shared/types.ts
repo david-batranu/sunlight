@@ -80,6 +80,31 @@ export interface AreaRecord {
   n?: string;
 }
 
+/**
+ * Terrain heightfield over the model square.
+ *
+ * Sample grid: `cols` × `rows` points in model space, row-major from the
+ * north-west corner (`x0`, `z0`) and increasing east (+X) / south (+Z).
+ * Heights are non-negative integer decimetres above `baseM`, so the wire
+ * payload stays compact; `baseM` records the absolute elevation of h = 0.
+ */
+export interface TerrainRecord {
+  /** West-most sample coordinate in decimetres. */
+  x0: number;
+  /** North-most sample coordinate in decimetres. */
+  z0: number;
+  /** Sample spacing in decimetres. */
+  step: number;
+  cols: number;
+  rows: number;
+  /** Row-major heights above `baseM`, in decimetres, length cols × rows. */
+  h: number[];
+  /** Absolute elevation in metres represented by a height of zero. */
+  baseM: number;
+  /** Human-readable elevation source, e.g. "AWS Terrain Tiles". */
+  source?: string;
+}
+
 export interface CityModel {
   v: number;
   key: string;
@@ -89,6 +114,8 @@ export interface CityModel {
   buildings: BuildingRecord[];
   roads: RoadRecord[];
   areas: AreaRecord[];
+  /** Optional heightfield; omitted for flat models or when elevation failed. */
+  terrain?: TerrainRecord;
 }
 
 /* ------------------------------------------------------------------ */
