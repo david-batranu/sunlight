@@ -55,6 +55,7 @@ let skyToken = 0;
 let modelByKey = new Map<string, CityModel>();
 let skyCache = new Map<string, SkyDay>();
 let labelHint: string | null = null;
+let userTouchedTime = urlState.date !== null || urlState.minute !== null;
 let destroyed = false;
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -177,12 +178,14 @@ async function applyModel(model: CityModel, token: number): Promise<void> {
   if (token !== loadToken) return;
   modelByKey.set(model.key, model);
   const tz = model.city.tz;
+  const state = store.getState();
   const date = explicitDate && isValidDateString(explicitDate) ? clampDate(explicitDate) : todayInTimezone(tz);
   const minute =
     explicitMinute != null
       ? Math.max(0, Math.min(1439, explicitMinute))
-      : minuteNowInTimezone(tz);
-  const state = store.getState();
+      : userTouchedTime
+        ? Math.max(0, Math.min(1439, state.minute))
+        : minuteNowInTimezone(tz);
 
   store.setState({
     city: model.city,
@@ -195,7 +198,7 @@ async function applyModel(model: CityModel, token: number): Promise<void> {
     generatingName: null,
     error: null,
     current: null,
-    notices: model.meta.warnings.length > 0 ? model.meta.warnings.slice(0, 2) : state.notices
+    notices: state.notices
   });
   document.title = `Sunlight — ${model.city.name}`;
   publishUrl(store.getState());
@@ -210,7 +213,6 @@ async function loadCity(target: ModelTarget, label?: string | null): Promise<voi
   activeTarget = target;
   labelHint = label ?? null;
   activeJobId = null;
-  explicitDate = explicitDate ?? null;
   skyToken += 1;
 
   const seedName = seedLabelForTarget(target);
@@ -273,8 +275,18 @@ async function pollJob(jobId: string, key: string, token: number): Promise<void>
     if (job.state === 'done' && job.modelUrl !== undefined) {
       activeJobId = null;
       store.setState({ phase: 'loading', progress: { step: 'write', label: 'Ready', percent: 100 } });
-      const model = await api.loadModel(key);
-      await applyModel(model, token);
+      try {
+        const model = await api.loadModel(key);
+        await applyModel(model, token);
+      } catch (error) {
+        if (token !== loadToken) return;
+        const info = errorFromUnknown(error);
+        store.setState({
+          phase: 'error',
+          progress: null,
+          error: { ...info, targetName: store.getState().generatingName ?? undefined }
+        });
+      }
       return;
     }
     if (job.state === 'error' || job.state === 'cancelled') {
@@ -414,7 +426,6 @@ function playbackTick(now: number): void {
 
 const actions: AppActions = {
   selectCity(target) {
-    explicitMinute = store.getState().playing ? null : explicitMinute;
     void loadCity(target);
   },
 
@@ -468,11 +479,13 @@ const actions: AppActions = {
   },
 
   setMinute(minute) {
+    userTouchedTime = true;
     explicitMinute = Math.max(0, Math.min(1439, minute));
     setMinute(explicitMinute, { rollDay: false });
   },
 
   stepMinutes(delta) {
+    userTouchedTime = true;
     setMinute(store.getState().minute + delta);
     explicitMinute = store.getState().minute;
   },
@@ -480,6 +493,8 @@ const actions: AppActions = {
   togglePlay() {
     const state = store.getState();
     if (!state.sky) return;
+    userTouchedTime = true;
+    explicitMinute = Math.floor(state.minute);
     store.setState({ playing: !state.playing });
     lastFrameAt = performance.now();
     if (!state.playing) lastPublishedMinute = playheadMinute;
@@ -494,6 +509,7 @@ const actions: AppActions = {
   },
 
   stepDay(delta) {
+    userTouchedTime = true;
     const date = addDays(store.getState().date, delta);
     void changeDate(date);
   },
@@ -503,11 +519,13 @@ const actions: AppActions = {
     if (!city) return;
     const date = todayInTimezone(city.tz);
     const minute = minuteNowInTimezone(city.tz);
-    explicitDate = null;
-    explicitMinute = null;
+    userTouchedTime = true;
+    explicitDate = date;
+    explicitMinute = minute;
     store.setState({ date, minute, current: setCurrentFromSky(store.getState().sky, minute) });
-    void changeDate(date);
-    setMinute(minute, { rollDay: false });
+    publishUrl(store.getState());
+    scene.setTime(minute);
+    void applySky(date, loadToken);
   },
 
   setNow() {

@@ -7,7 +7,7 @@ ENV npm_config_cache=/tmp/npm-cache
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
-COPY tsconfig.json tsconfig.web.json tsconfig.server.json vite.config.ts index.html ./
+COPY tsconfig.json tsconfig.web.json tsconfig.server.json tsconfig.tests.json vite.config.ts index.html ./
 COPY shared ./shared
 COPY src ./src
 COPY server ./server

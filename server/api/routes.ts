@@ -21,7 +21,7 @@ import { sendCachedJson, sendError, sendJson } from '../http/respond.ts';
 import { SkyDayCache } from './sky-cache.ts';
 
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
-const MODEL_KEY_RE = /^[a-z0-9-]{1,96}$/;
+const MODEL_KEY_RE = /^[A-Za-z0-9._-]{1,96}$/;
 
 export interface ApiDependencies {
   config: AppConfig;

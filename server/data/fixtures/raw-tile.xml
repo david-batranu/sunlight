@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<osm version="0.6" generator="sunlight-fixture">
+  <bounds minlat="45.64500" minlon="25.60000" maxlat="45.65200" maxlon="25.61200"/>
+  <node id="5001" lat="45.64800" lon="25.60500"/>
+  <node id="5002" lat="45.64800" lon="25.60600"/>
+  <node id="5003" lat="45.64880" lon="25.60600"/>
+  <node id="5004" lat="45.64880" lon="25.60500"/>
+  <node id="5011" lat="45.64850" lon="25.60700"/>
+  <node id="5012" lat="45.64850" lon="25.60800"/>
+  <node id="5013" lat="45.64920" lon="25.60800"/>
+  <node id="5014" lat="45.64920" lon="25.60700"/>
+  <node id="5021" lat="45.64820" lon="25.60300"/>
+  <node id="5022" lat="45.64820" lon="25.60900"/>
+  <node id="5031" lat="45.64890" lon="25.60300"/>
+  <node id="5032" lat="45.64890" lon="25.60900"/>
+  <way id="6001">
+    <nd ref="5001"/>
+    <nd ref="5002"/>
+    <nd ref="5003"/>
+    <nd ref="5004"/>
+    <nd ref="5001"/>
+    <tag k="building" v="house"/>
+    <tag k="height" v="9"/>
+  </way>
+  <way id="6002">
+    <nd ref="5011"/>
+    <nd ref="5012"/>
+    <nd ref="5013"/>
+    <nd ref="5014"/>
+    <nd ref="5011"/>
+    <tag k="building" v="apartments"/>
+    <tag k="building:levels" v="4"/>
+  </way>
+  <way id="6011">
+    <nd ref="5021"/>
+    <nd ref="5022"/>
+    <tag k="highway" v="residential"/>
+    <tag k="name" v="Strada Testului"/>
+  </way>
+  <way id="6021">
+    <nd ref="5031"/>
+    <nd ref="5032"/>
+    <tag k="railway" v="rail"/>
+  </way>
+</osm>

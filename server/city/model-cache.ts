@@ -1,0 +1,348 @@
+/**
+ * Persistent gzipped model cache.
+ *
+ * Layout under `<cacheDir>/models/`:
+ *   `<key>.json.gz`     gzipped model JSON (exactly what GET /api/models/:key serves)
+ *   `<key>.meta.json`   sidecar: ETag, size, resolved target, model meta
+ *
+ * - Writes are atomic (temp file → fsync → rename).
+ * - Reads verify the SHA-256 in the sidecar, so bit rot is detected and the
+ *   corrupt entry is removed instead of being served.
+ * - Startup scans for incomplete/corrupt entries and removes them.
+ * - LRU eviction keeps total gzipped bytes below the configured limit.
+ */
+
+import { mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises';
+import path from 'node:path';
+import type { CityInfo, ModelMeta, ModelTarget } from '../../shared/types.ts';
+import { CityError } from './errors.ts';
+import { atomicWriteFile } from './fs-atomic.ts';
+import { log } from './logger.ts';
+import { etagDigest, isCityInfo, isModelMeta, sha256Hex, validateModelTarget } from './model-io.ts';
+
+const MODELS_SUBDIR = 'models';
+const MODEL_SUFFIX = '.json.gz';
+const META_SUFFIX = '.meta.json';
+const SIDECAR_FORMAT = 1;
+
+export interface CacheSidecar {
+  v: number;
+  key: string;
+  etag: string;
+  gzipBytes: number;
+  modelVersion: number;
+  radiusM: number;
+  meta: ModelMeta;
+  city: CityInfo;
+  target: ModelTarget;
+  seedSlug: string | null;
+}
+
+export interface CacheWriteInfo {
+  meta: ModelMeta;
+  city: CityInfo;
+  target: ModelTarget;
+  seedSlug: string | null;
+  modelVersion: number;
+  radiusM: number;
+}
+
+export interface CacheEntry {
+  key: string;
+  etag: string;
+  gzipBytes: number;
+  lastAccess: number;
+  meta: ModelMeta;
+  city: CityInfo;
+  target: ModelTarget;
+  seedSlug: string | null;
+}
+
+export interface CachedModel {
+  entry: CacheEntry;
+  gzipped: Buffer;
+}
+
+const HEX_SHA256 = /^[0-9a-f]{64}$/;
+
+export class ModelCache {
+  private readonly modelsDir: string;
+  private readonly maxBytes: number;
+  private readonly entries = new Map<string, CacheEntry>();
+  private totalBytes = 0;
+  /** Monotonic access counter: LRU ordering that never ties within a run. */
+  private accessCounter = 0;
+
+  constructor(cacheDir: string, maxBytes: number) {
+    this.modelsDir = path.join(cacheDir, MODELS_SUBDIR);
+    // A zero/negative limit means "no limit" rather than "wipe the cache".
+    this.maxBytes = Number.isFinite(maxBytes) && maxBytes > 0 ? Math.floor(maxBytes) : Number.POSITIVE_INFINITY;
+  }
+
+  get models(): number {
+    return this.entries.size;
+  }
+
+  get bytes(): number {
+    return this.totalBytes;
+  }
+
+  get maxBytesLimit(): number {
+    return this.maxBytes;
+  }
+
+  /** Scans the cache directory, dropping corrupt/incomplete entries and evicting LRU. */
+  async init(): Promise<void> {
+    await mkdir(this.modelsDir, { recursive: true });
+    let names: string[];
+    try {
+      names = await readdir(this.modelsDir);
+    } catch (error) {
+      throw new CityError(
+        'CACHE_FAILED',
+        `Could not read the model cache directory: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+        false
+      );
+    }
+
+    const modelKeys = new Set<string>();
+    for (const name of names) {
+      if (name.includes('.tmp-')) {
+        await unlink(path.join(this.modelsDir, name)).catch(() => undefined);
+        continue;
+      }
+      if (name.endsWith(MODEL_SUFFIX)) modelKeys.add(name.slice(0, -MODEL_SUFFIX.length));
+    }
+    const sidecars = new Set<string>();
+    for (const name of names) {
+      if (name.endsWith(META_SUFFIX)) sidecars.add(name.slice(0, -META_SUFFIX.length));
+    }
+
+    // Orphan sidecars are leftovers from an interrupted write; remove them.
+    for (const key of sidecars) {
+      if (!modelKeys.has(key)) await unlink(this.metaPath(key)).catch(() => undefined);
+    }
+
+    for (const key of [...modelKeys].sort()) {
+      const entry = await this.loadEntry(key);
+      if (!entry) continue;
+      this.entries.set(key, entry);
+      this.totalBytes += entry.gzipBytes;
+    }
+
+    await this.evictToFit(null);
+    log.info(`model cache: ${this.entries.size} entries, ${formatBytes(this.totalBytes)}`);
+  }
+
+  async read(key: string): Promise<CachedModel | null> {
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+    let gzipped: Buffer;
+    try {
+      gzipped = await readFile(this.modelPath(key));
+    } catch (error) {
+      log.warn(`dropping unreadable cache entry ${key}: ${error instanceof Error ? error.message : String(error)}`);
+      await this.remove(key);
+      return null;
+    }
+    if (gzipped.length !== entry.gzipBytes) {
+      log.warn(`dropping cache entry ${key}: size changed on disk (${gzipped.length} != ${entry.gzipBytes})`);
+      await this.remove(key);
+      return null;
+    }
+    if (sha256Hex(gzipped) !== etagDigest(entry.etag)) {
+      log.warn(`dropping cache entry ${key}: checksum mismatch`);
+      await this.remove(key);
+      return null;
+    }
+    entry.lastAccess = this.nextAccess();
+    return { entry, gzipped };
+  }
+
+  async write(key: string, gzipped: Buffer, info: CacheWriteInfo): Promise<CacheEntry> {
+    const etag = `"${sha256Hex(gzipped)}"`;
+    const sidecar: CacheSidecar = {
+      v: SIDECAR_FORMAT,
+      key,
+      etag,
+      gzipBytes: gzipped.length,
+      modelVersion: info.modelVersion,
+      radiusM: info.radiusM,
+      meta: info.meta,
+      city: info.city,
+      target: info.target,
+      seedSlug: info.seedSlug
+    };
+    try {
+      await atomicWriteFile(this.modelPath(key), gzipped);
+      await atomicWriteFile(this.metaPath(key), JSON.stringify(sidecar));
+    } catch (error) {
+      await unlink(this.modelPath(key)).catch(() => undefined);
+      await unlink(this.metaPath(key)).catch(() => undefined);
+      throw new CityError(
+        'CACHE_FAILED',
+        `Could not write the model cache: ${error instanceof Error ? error.message : String(error)}`,
+        500,
+        false
+      );
+    }
+
+    const existing = this.entries.get(key);
+    if (existing) this.totalBytes -= existing.gzipBytes;
+    const entry: CacheEntry = {
+      key,
+      etag,
+      gzipBytes: gzipped.length,
+      lastAccess: this.nextAccess(),
+      meta: info.meta,
+      city: info.city,
+      target: info.target,
+      seedSlug: info.seedSlug
+    };
+    this.entries.set(key, entry);
+    this.totalBytes += entry.gzipBytes;
+    await this.evictToFit(key);
+    return entry;
+  }
+
+  async remove(key: string): Promise<void> {
+    const entry = this.entries.get(key);
+    if (entry) {
+      this.entries.delete(key);
+      this.totalBytes -= entry.gzipBytes;
+    }
+    await unlink(this.modelPath(key)).catch(() => undefined);
+    await unlink(this.metaPath(key)).catch(() => undefined);
+  }
+
+  /** Removes every cached model (used by scripts/clear-cache and tests). */
+  async clear(): Promise<void> {
+    let names: string[] = [];
+    try {
+      names = await readdir(this.modelsDir);
+    } catch {
+      names = [];
+    }
+    for (const name of names) await unlink(path.join(this.modelsDir, name)).catch(() => undefined);
+    this.entries.clear();
+    this.totalBytes = 0;
+  }
+
+  private async loadEntry(key: string): Promise<CacheEntry | null> {
+    const sidecar = await this.readSidecar(key);
+    if (!sidecar) {
+      await this.cleanup(key);
+      return null;
+    }
+    let size: number;
+    try {
+      size = (await stat(this.modelPath(key))).size;
+    } catch {
+      await this.cleanup(key);
+      return null;
+    }
+    if (size !== sidecar.gzipBytes) {
+      log.warn(`dropping cache entry ${key}: model size does not match its sidecar`);
+      await this.cleanup(key);
+      return null;
+    }
+    return {
+      key,
+      etag: sidecar.etag,
+      gzipBytes: sidecar.gzipBytes,
+      lastAccess: this.nextAccess(),
+      meta: sidecar.meta,
+      city: sidecar.city,
+      target: sidecar.target,
+      seedSlug: sidecar.seedSlug
+    };
+  }
+
+  private async readSidecar(key: string): Promise<CacheSidecar | null> {
+    let raw: string;
+    try {
+      raw = await readFile(this.metaPath(key), 'utf8');
+    } catch {
+      return null;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== 'object') return null;
+    const value = parsed as Record<string, unknown>;
+    if (value.v !== SIDECAR_FORMAT) return null;
+    if (value.key !== key) return null;
+    if (typeof value.etag !== 'string' || !/^"[0-9a-f]{64}"$/.test(value.etag)) return null;
+    if (!Number.isSafeInteger(value.gzipBytes) || (value.gzipBytes as number) <= 0) return null;
+    if (!Number.isSafeInteger(value.modelVersion) || (value.modelVersion as number) < 1) return null;
+    if (typeof value.radiusM !== 'number' || !Number.isFinite(value.radiusM) || value.radiusM <= 0) return null;
+    if (!isModelMeta(value.meta)) return null;
+    if (!isCityInfo(value.city)) return null;
+    let target: ModelTarget;
+    try {
+      target = validateModelTarget(value.target);
+    } catch {
+      return null;
+    }
+    const seedSlug = typeof value.seedSlug === 'string' && value.seedSlug ? value.seedSlug : null;
+    return {
+      v: SIDECAR_FORMAT,
+      key,
+      etag: value.etag,
+      gzipBytes: value.gzipBytes as number,
+      modelVersion: value.modelVersion as number,
+      radiusM: value.radiusM,
+      meta: value.meta,
+      city: value.city,
+      target,
+      seedSlug
+    };
+  }
+
+  private async cleanup(key: string): Promise<void> {
+    await unlink(this.modelPath(key)).catch(() => undefined);
+    await unlink(this.metaPath(key)).catch(() => undefined);
+  }
+
+  /** Evicts least-recently-used entries until the cache fits (never the protected key). */
+  private async evictToFit(protectedKey: string | null): Promise<void> {
+    if (!Number.isFinite(this.maxBytes)) return;
+    if (this.totalBytes <= this.maxBytes) return;
+    const candidates = [...this.entries.values()]
+      .filter((entry) => entry.key !== protectedKey)
+      .sort((a, b) => a.lastAccess - b.lastAccess);
+    for (const candidate of candidates) {
+      if (this.totalBytes <= this.maxBytes) break;
+      log.info(`evicting cached model ${candidate.key} (LRU)`);
+      this.entries.delete(candidate.key);
+      this.totalBytes -= candidate.gzipBytes;
+      await unlink(this.modelPath(candidate.key)).catch(() => undefined);
+      await unlink(this.metaPath(candidate.key)).catch(() => undefined);
+    }
+  }
+
+  private nextAccess(): number {
+    this.accessCounter += 1;
+    return this.accessCounter;
+  }
+
+  private modelPath(key: string): string {
+    return path.join(this.modelsDir, `${key}${MODEL_SUFFIX}`);
+  }
+
+  private metaPath(key: string): string {
+    return path.join(this.modelsDir, `${key}${META_SUFFIX}`);
+  }
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+export { HEX_SHA256 };

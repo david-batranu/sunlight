@@ -1,0 +1,161 @@
+{
+  "v": 1,
+  "modelVersion": 1,
+  "radiusM": 900,
+  "generatedAt": "2026-11-16T11:20:45.095Z",
+  "attribution": "\u00a9 OpenStreetMap contributors (ODbL 1.0)",
+  "cities": [
+    {
+      "slug": "brasov",
+      "geonameId": 683844,
+      "name": "Bra\u0219ov",
+      "key": "gn-683844-r900-v1",
+      "file": "brasov.json.gz",
+      "bytes": 130516,
+      "sha256": "7c02f3851056452cb761dccd4487e819a73d14445966b16ae1873c13203de7b6",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:08.513Z",
+      "stats": {
+        "buildings": 2872,
+        "roads": 1031,
+        "areas": 109,
+        "dropped": 0
+      }
+    },
+    {
+      "slug": "bucharest",
+      "geonameId": 683506,
+      "name": "Bucure\u0219ti",
+      "key": "gn-683506-r900-v1",
+      "file": "bucharest.json.gz",
+      "bytes": 156517,
+      "sha256": "d3b7d599b8d77b42b3005cc917fe86ee755b57056b3a15a7f3b107788f12f6ca",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:12.738Z",
+      "stats": {
+        "buildings": 2680,
+        "roads": 1441,
+        "areas": 343,
+        "dropped": 0
+      }
+    },
+    {
+      "slug": "cluj-napoca",
+      "geonameId": 681290,
+      "name": "Cluj-Napoca",
+      "key": "gn-681290-r900-v1",
+      "file": "cluj-napoca.json.gz",
+      "bytes": 125029,
+      "sha256": "f8173987a7cc6a603dabba0ec8d1e5f1e794d764a93d142a553b81e3d595065b",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:24.813Z",
+      "stats": {
+        "buildings": 3294,
+        "roads": 1058,
+        "areas": 153,
+        "dropped": 0
+      }
+    },
+    {
+      "slug": "timisoara",
+      "geonameId": 665087,
+      "name": "Timi\u0219oara",
+      "key": "gn-665087-r900-v1",
+      "file": "timisoara.json.gz",
+      "bytes": 99600,
+      "sha256": "e2b4f651c276aab8cf37683729ad9c460aef67379ff8a567595ae071ae3f587a",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:28.920Z",
+      "stats": {
+        "buildings": 1500,
+        "roads": 2251,
+        "areas": 263,
+        "dropped": 0
+      }
+    },
+    {
+      "slug": "iasi",
+      "geonameId": 675810,
+      "name": "Ia\u0219i",
+      "key": "gn-675810-r900-v1",
+      "file": "iasi.json.gz",
+      "bytes": 120371,
+      "sha256": "392540a02c1e32953120a8799e7b13a98d9f474549cc6663bc71e5f6d30a7a28",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:33.719Z",
+      "stats": {
+        "buildings": 3627,
+        "roads": 620,
+        "areas": 55,
+        "dropped": 0
+      }
+    },
+    {
+      "slug": "constanta",
+      "geonameId": 680963,
+      "name": "Constan\u021ba",
+      "key": "gn-680963-r900-v1",
+      "file": "constanta.json.gz",
+      "bytes": 171390,
+      "sha256": "a8aa88f751765bff8e70ae9ae8ce72fb1ba81c7d30503295d073904db176b083",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:36.860Z",
+      "stats": {
+        "buildings": 5567,
+        "roads": 1272,
+        "areas": 151,
+        "dropped": 0
+      }
+    },
+    {
+      "slug": "sibiu",
+      "geonameId": 667268,
+      "name": "Sibiu",
+      "key": "gn-667268-r900-v1",
+      "file": "sibiu.json.gz",
+      "bytes": 150218,
+      "sha256": "7ab2536e760c566d1f3c1aac3b98f685dd95760f58d6afefbd9a75130da28cb5",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:40.610Z",
+      "stats": {
+        "buildings": 3973,
+        "roads": 1011,
+        "areas": 221,
+        "dropped": 0
+      }
+    },
+    {
+      "slug": "oradea",
+      "geonameId": 671768,
+      "name": "Oradea",
+      "key": "gn-671768-r900-v1",
+      "file": "oradea.json.gz",
+      "bytes": 63712,
+      "sha256": "78425a02e2656612425a3ad9d7001d10b5359ffc723a3a6a3c98ed1c7fd3a560",
+      "modelVersion": 1,
+      "radiusM": 900,
+      "source": "osm-api",
+      "generatedAt": "2026-11-16T11:20:45.095Z",
+      "stats": {
+        "buildings": 1472,
+        "roads": 492,
+        "areas": 36,
+        "dropped": 0
+      }
+    }
+  ]
+}
