@@ -16,10 +16,15 @@ import type {
   NearestCityResponse,
   SkyDay
 } from '../shared/types.ts';
-import { SEED_BY_GEONAME_ID, DEFAULT_CITY_GEONAME_ID } from '../shared/constants.ts';
-import type { AppActions, CurrentLight, SceneHandle, UIContext } from './app/contracts.ts';
+import {
+  DETAIL_DEFAULT_RADIUS_M,
+  SEED_BY_GEONAME_ID,
+  DEFAULT_CITY_GEONAME_ID
+} from '../shared/constants.ts';
+import type { AppActions, CurrentLight, DetailWindow, SceneHandle, UIContext } from './app/contracts.ts';
 import { ApiRequestError, createApi } from './app/api.ts';
 import { createInitialState, createStore, type AppState } from './app/state.ts';
+import { clampDetailWindow as clampDetailWindowInFrame, type DetailFrame } from './app/detail.ts';
 import {
   addDays,
   clampDate,
@@ -38,6 +43,30 @@ const SKY_PREFETCH_DELAY_MS = 1200;
 const HOVER_THROTTLE_MS = 70;
 const STICKY_TOOLTIP_MS = 5000;
 const METRES_PER_DEGREE = 111_320;
+
+function currentModelDetailFrame(): { centerX: number; centerZ: number; radiusM: number } | null {
+  const model = store.getState().model;
+  if (!model) return null;
+  const bounds = model.bounds;
+  return {
+    centerX: (bounds.minX + bounds.maxX) / 20,
+    centerZ: (bounds.minZ + bounds.maxZ) / 20,
+    radiusM: model.meta.radiusM
+  };
+}
+
+function clampDetailWindow(input: DetailWindow): DetailWindow | null {
+  const frame = currentModelDetailFrame();
+  if (!frame) return null;
+  return clampDetailWindowInFrame(frame, input);
+}
+
+function defaultDetailWindow(): DetailWindow | null {
+  const frame = currentModelDetailFrame();
+  if (!frame) return null;
+  const radiusM = Math.min(DETAIL_DEFAULT_RADIUS_M, frame.radiusM);
+  return clampDetailWindow({ centerX: frame.centerX, centerZ: frame.centerZ, radiusM });
+}
 
 interface LoadOptions {
   /** New-city selection: always jump to that city's current local date/time. */
@@ -251,7 +280,9 @@ async function applyModel(model: CityModel, token: number, options: LoadOptions 
     generatingName: null,
     error: null,
     current: null,
-    notices: state.notices
+    notices: state.notices,
+    detailWindow: null,
+    detailPanelOpen: false
   });
   document.title = `Sunlight — ${model.city.name}`;
   publishUrl(store.getState());
@@ -276,7 +307,9 @@ async function loadCity(target: ModelTarget, label?: string | null, options: Loa
     current: null,
     progress: null,
     generatingName: seedName,
-    error: null
+    error: null,
+    detailWindow: null,
+    detailPanelOpen: false
   });
   hideBoot();
 
@@ -633,6 +666,40 @@ const actions: AppActions = {
     }
   },
 
+  toggleDetailPanel() {
+    const state = store.getState();
+    if (state.phase !== 'ready' || !state.model) return;
+    if (state.detailPanelOpen) {
+      actions.closeDetailPanel();
+      return;
+    }
+    const window = state.detailWindow ?? defaultDetailWindow();
+    if (!window) return;
+    store.setState({ detailPanelOpen: true, detailWindow: window, pickingArea: false, hover: null });
+    scene.setDetailWindow(window);
+    scene.focusDetailWindow(window);
+  },
+
+  closeDetailPanel() {
+    if (!store.getState().detailPanelOpen && !store.getState().detailWindow) return;
+    store.setState({ detailPanelOpen: false, detailWindow: null });
+    scene.setDetailWindow(null);
+  },
+
+  setDetailWindow(window) {
+    const clamped = clampDetailWindow(window);
+    if (!clamped) return;
+    store.setState({ detailWindow: clamped });
+  },
+
+  focusDetailWindow() {
+    const state = store.getState();
+    const window = state.detailWindow ?? defaultDetailWindow();
+    if (!window) return;
+    scene.setDetailWindow(window);
+    scene.focusDetailWindow(window);
+  },
+
   beginAreaPick() {
     const state = store.getState();
     if (state.phase !== 'ready' || !state.model) return;
@@ -787,6 +854,10 @@ store.subscribe((state, previous) => {
     }
     scene.setModel(state.model);
     scene.setTime(state.minute);
+    scene.setDetailWindow(state.detailWindow);
+  }
+  if (state.detailWindow !== previous.detailWindow) {
+    scene.setDetailWindow(state.detailWindow);
   }
   if (state.sky !== previous.sky) {
     scene.setSky(state.sky);

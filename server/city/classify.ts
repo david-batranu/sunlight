@@ -227,15 +227,48 @@ const ROAD_CLASSES: Record<string, RoadRecord['c']> = {
   road: 3,
   service: 4,
   track: 4,
-  footway: 4,
-  pedestrian: 4,
-  path: 4,
-  cycleway: 4,
-  steps: 4,
-  bridleway: 4,
-  corridor: 4,
-  platform: 4
+  pedestrian: 4
 };
+
+/** Ways treated as candidate pedestrian paths and filtered after terrain sampling. */
+const MINOR_PATH_HIGHWAYS = new Set([
+  'footway',
+  'path',
+  'steps',
+  'cycleway',
+  'bridleway',
+  'corridor',
+  'platform'
+]);
+
+const HIKING_TAGS = ['sac_scale', 'trail_visibility', 'mtb:scale'] as const;
+
+/**
+ * True when the way is a pedestrian/footpath candidate rather than a street.
+ * `classifyRoad` returns 0 for these; the builder keeps only the ones that look
+ * like hiking trails (explicit hiking tags or natural surface on a climb).
+ */
+export function isMinorPathWay(tags: OsmTags): boolean {
+  if (tags.tunnel === 'yes' || tags.tunnel === 'building_passage') return false;
+  const highway = tags.highway;
+  return Boolean(highway && MINOR_PATH_HIGHWAYS.has(highway));
+}
+
+/** Explicit hiking indicators that should survive even on flat terrain. */
+export function hasHikingTags(tags: OsmTags): boolean {
+  for (const key of HIKING_TAGS) {
+    if (typeof tags[key] === 'string' && tags[key].trim() !== '') return true;
+  }
+  const route = tags.route;
+  return typeof route === 'string' && /(^|;)\s*hiking\s*(;|$)/i.test(route);
+}
+
+/** Natural/unsurfaced paths are candidates for mountain trails. */
+export function hasNaturalPathSurface(tags: OsmTags): boolean {
+  const surface = (tags.surface ?? '').trim().toLowerCase();
+  if (!surface) return true;
+  return /ground|gravel|unpaved|dirt|earth|grass|rock|stone|wood|fine_gravel|compacted/.test(surface);
+}
 
 /**
  * Maps an OSM way to a model road class, or 0 when it is not drawn.
@@ -246,6 +279,7 @@ const ROAD_CLASSES: Record<string, RoadRecord['c']> = {
  */
 export function classifyRoad(tags: OsmTags): RoadRecord['c'] | 0 {
   if (tags.tunnel === 'yes' || tags.tunnel === 'building_passage') return 0;
+  if (isMinorPathWay(tags)) return 0;
   const railway = tags.railway;
   if (railway && RAIL_VALUES.has(railway)) return 9;
   const highway = tags.highway;

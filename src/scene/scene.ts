@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import type { CityModel, SkyDay } from '../../shared/types.ts';
-import type { HitFeature, SceneDebug, SceneHandle } from '../app/contracts.ts';
+import type { DetailWindow, HitFeature, SceneDebug, SceneHandle } from '../app/contracts.ts';
 import {
   CAMERA_DISTANCE_M,
   fitBoxFor,
@@ -126,6 +126,41 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     flatShading: true
   });
 
+  /** Detail-window mask: full colour inside, muted context outside. */
+  const detailUniforms = {
+    uDetailEnabled: { value: 0 },
+    uDetailCenter: { value: new THREE.Vector2(0, 0) },
+    uDetailHalf: { value: new THREE.Vector2(0, 0) }
+  };
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, detailUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nvarying vec3 vDetailWorld;'
+      )
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvDetailWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform float uDetailEnabled;\nuniform vec2 uDetailCenter;\nuniform vec2 uDetailHalf;\nvarying vec3 vDetailWorld;'
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        if (uDetailEnabled > 0.5) {
+          vec2 detailDelta = abs(vDetailWorld.xz - uDetailCenter) - uDetailHalf;
+          float detailOutside = smoothstep(-1.0, 8.0, max(detailDelta.x, detailDelta.y));
+          float detailLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+          vec3 detailMuted = mix(vec3(detailLuma), diffuseColor.rgb, 0.22) * 0.64;
+          diffuseColor.rgb = mix(detailMuted, diffuseColor.rgb, 1.0 - detailOutside);
+        }`
+      );
+  };
+
   /* ---------------------------------------------------------------- */
   /* Lights                                                            */
   /* ---------------------------------------------------------------- */
@@ -173,6 +208,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let areasMesh: THREE.Mesh | null = null;
   let modelKey: string | null = null;
   let currentModel: CityModel | null = null;
+  let detailWindow: DetailWindow | null = null;
   let disposed = false;
 
   /** Raycast targets for feature picking (buildings, roads, areas). */
@@ -478,6 +514,26 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     applyLightingIfNeeded(true);
   }
 
+  function setDetailWindow(nextDetailWindow: DetailWindow | null): void {
+    if (disposed) return;
+    detailWindow = nextDetailWindow;
+    if (nextDetailWindow) {
+      detailUniforms.uDetailEnabled.value = 1;
+      detailUniforms.uDetailCenter.value.set(nextDetailWindow.centerX, nextDetailWindow.centerZ);
+      detailUniforms.uDetailHalf.value.set(nextDetailWindow.radiusM, nextDetailWindow.radiusM);
+    } else {
+      detailUniforms.uDetailEnabled.value = 0;
+    }
+  }
+
+  function focusDetailWindow(window: DetailWindow): void {
+    if (disposed) return;
+    // Keep context visible around the selected square; clamp by ZOOM_MAX.
+    const desiredHeight = Math.max(140, window.radiusM * 2 * 1.35);
+    const zoom = Math.max(0.45, Math.min(32, (halfHeight * 2) / desiredHeight));
+    controls.setFocus(window.centerX, window.centerZ, zoom);
+  }
+
   function setSky(nextSky: SkyDay | null): void {
     if (disposed) return;
     sky = nextSky;
@@ -629,6 +685,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     setSky,
     setTime,
     setQuality,
+    setDetailWindow,
+    focusDetailWindow,
     resetCamera,
     resize,
     dispose,

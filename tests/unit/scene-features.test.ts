@@ -80,11 +80,12 @@ test('road class labels follow the contract mapping', () => {
   assert.equal(roadKindLabel(1), 'Main street'); // arterial
   assert.equal(roadKindLabel(2), 'Primary street');
   assert.equal(roadKindLabel(3), 'Street');
-  assert.equal(roadKindLabel(4), 'Pedestrian street');
+  assert.equal(roadKindLabel(4), 'Local street');
+  assert.equal(roadKindLabel(5), 'Hiking trail');
   assert.equal(roadKindLabel(9), 'Railway');
   assert.equal(roadKindLabel(0), 'Street', 'unknown classes fall back to Street');
   assert.equal(roadKindLabel(7), 'Street');
-  assert.deepEqual(Object.keys(ROAD_KIND_LABELS).map(Number), [1, 2, 3, 4, 9]);
+  assert.deepEqual(Object.keys(ROAD_KIND_LABELS).map(Number), [1, 2, 3, 4, 5, 9]);
 });
 
 test('area kind labels follow the contract mapping', () => {

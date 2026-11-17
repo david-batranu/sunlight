@@ -25,7 +25,7 @@ export const DEFAULT_PITCH_DEG = 35.264389682754654;
 export const PITCH_MIN_DEG = 18;
 export const PITCH_MAX_DEG = 72;
 export const ZOOM_MIN = 0.45;
-export const ZOOM_MAX = 8;
+export const ZOOM_MAX = 32;
 export const DEFAULT_ZOOM = 1;
 /** Margin around the projected model so nothing touches the viewport edge. */
 export const FIT_PADDING = 1.1;

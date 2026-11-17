@@ -28,6 +28,14 @@ export interface CurrentLight {
   moonAz: number;
 }
 
+export interface DetailWindow {
+  /** Detail-window centre in model metres (same space as CityModel geometry / 10). */
+  centerX: number;
+  centerZ: number;
+  /** Half-width of the high-quality square, in metres. */
+  radiusM: number;
+}
+
 export interface AppActions {
   selectCity(target: ModelTarget): void;
   selectSearchResult(result: CitySearchResult): void;
@@ -42,6 +50,10 @@ export interface AppActions {
   goToday(): void;
   setNow(): void;
   resetCamera(): void;
+  toggleDetailPanel(): void;
+  closeDetailPanel(): void;
+  setDetailWindow(window: DetailWindow): void;
+  focusDetailWindow(): void;
   beginAreaPick(): void;
   cancelAreaPick(): void;
   dismissHover(): void;
@@ -104,6 +116,10 @@ export interface SceneHandle {
   getCameraAzimuth(): number;
   /** Ground-plane point (metres, model space) under a viewport pixel. */
   getGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null;
+  /** Applies the dimmed/low-detail context mask around a detail window. */
+  setDetailWindow(window: DetailWindow | null): void;
+  /** Fits the camera to a detail window (with context margin). */
+  focusDetailWindow(window: DetailWindow): void;
 }
 
 export interface UIContext {

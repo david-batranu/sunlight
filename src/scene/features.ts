@@ -22,7 +22,8 @@ export const ROAD_KIND_LABELS: Readonly<Record<number, string>> = {
   1: 'Main street', // arterial
   2: 'Primary street',
   3: 'Street',
-  4: 'Pedestrian street',
+  4: 'Local street',
+  5: 'Hiking trail',
   9: 'Railway'
 };
 

@@ -384,6 +384,7 @@ test('mobile 390x844: key controls visible, usable, no horizontal overflow', asy
           '[data-testid="city-chip"]',
           '[data-testid="open-search"]',
           '[data-testid="locate"]',
+          '[data-testid="detail-open"]',
           '[data-testid="about-open"]',
           '[data-testid="time-readout"]',
           '[data-testid="date-input"]',
@@ -422,6 +423,50 @@ test('mobile 390x844: key controls visible, usable, no horizontal overflow', asy
     },
     { viewport: MOBILE, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }
   );
+});
+
+test('detail area minimap: drag, resize and focus without reloading the city', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+
+    await page.locator('[data-testid="detail-open"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
+    assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), true);
+    const opened = await readState(page);
+    assert.ok(opened.detailWindow, 'opening the panel should create a detail window');
+    assert.ok(opened.detailWindow.radiusM >= 100 && opened.detailWindow.radiusM <= 1500);
+
+    // Resize to a 300 m radius; the camera should zoom to fit it.
+    await page.locator('[data-testid="detail-size-input"]').evaluate((input) => {
+      input.value = '300';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForFunction(() => window.__sunlight.getState().detailWindow?.radiusM === 300);
+    await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom > 1.1, null, {
+      timeout: 5000
+    });
+    const resized = await readState(page);
+    assert.equal(resized.detailWindow?.radiusM, 300);
+
+    // Drag the minimap frame, which updates the window without an API reload.
+    const canvas = page.locator('[data-testid="detail-canvas"]');
+    const box = await canvas.boundingBox();
+    assert.ok(box);
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.68, box.y + box.height * 0.42, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    const dragged = await readState(page);
+    assert.notEqual(dragged.detailWindow?.centerX, resized.detailWindow?.centerX);
+    assert.equal(dragged.modelKey, resized.modelKey, 'dragging must not reload the model');
+
+    await page.screenshot({ path: `${SHOTS}/detail-area.png` });
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === false);
+    assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), false);
+  });
 });
 
 test('wide model: 1500 m city, named landmarks and a camera-following compass', async () => {

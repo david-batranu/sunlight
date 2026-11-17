@@ -89,7 +89,7 @@ Provider responses are not persisted between attempts in v1 (a failed generation
 
 - **Elevation**: before the CPU geometry build, the server resamples AWS Terrain Tiles (Terrarium PNGs) over the model square into a 49 × 49 heightfield, stored as non-negative decimetres relative to the lowest sample. Terrain is vertically exaggerated 0.3× and clamped to 160 m of relief for a readable diorama; failures fall back to flat ground with a warning.
 - **Buildings**: closed ways and multipolygon relations; outer rings with holes; skip building parts, construction, underground, and `building=no`. OSM names/kind tags are sanitized into optional `n`/`k` fields for landmarks (POI-tagged, civic, or ≥25 m; capped deterministically at 1200 per city).
-- **Roads/areas**: named roads and named parks/water/forest/plazas keep their `n` for tooltips.
+- **Roads/areas**: named roads and named parks/water/forest/plazas keep their `n` for tooltips. Road classes are 1 arterial, 2 primary, 3 secondary, 4 local/pedestrian/service, 5 hiking trail, 9 rail. Flat footpaths are dropped; natural/steep or explicitly tagged (`sac_scale`, `trail_visibility`, `mtb:scale`, `route=hiking`) trails are kept as class 5.
 - **Roads**: motorway through living street/pedestrian, skipping tunnels; bridges stay at ground level in the diorama; service roads only when named.
 - **Areas**: water, reservoir/riverbank, parks, grass, forest, plazas.
 - **Rail**: surface railway lines rendered as thin tracks.
@@ -125,7 +125,7 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 ```json
 {
   "v": 1,
-  "key": "gn-683844-r1500-v3",
+  "key": "gn-683844-r1500-v4",
   "city": { "geonameId": 683844, "name": "Brașov", "country": "RO", "lat": 45.64861, "lon": 25.60613, "tz": "Europe/Bucharest" },
   "meta": { "generatedAt": "...", "source": "overpass", "seed": false, "radiusM": 1500,
             "stats": { "buildings": 4812, "roads": 530, "areas": 44, "dropped": 0 },
@@ -163,8 +163,9 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 
 ## 8. Rendering and lighting
 
-- **Camera**: orthographic, isometric pitch (35.264°) default from the south-east with north-west up (azimuth 135°), 0.45–8× zoom, fit to the ~3.16 km base and up to ~120 m of relief. Pan on the ground plane, orbit, zoom, reset; damped and clamped. Sun direction is world-fixed and independent of the camera.
+- **Camera**: orthographic, isometric pitch (35.264°) default from the south-east with north-west up (azimuth 135°), 0.45–32× zoom, fit to the ~3.16 km base and up to ~120 m of relief. Pan on the ground plane, orbit, zoom, reset; damped and clamped. Sun direction is world-fixed and independent of the camera.
 - **Geometry**: merged vertex-coloured, flat-shaded terrain heightfield with perimeter skirt, merged buildings, roads/rail ribbons and earcut-triangulated areas with holes draped over the heightfield; steep forest polygons are baked into the terrain colour to avoid sticker-like overlays on slopes; a warm clay-edged plinth. One draw call per material family, no per-frame allocations. A parallel per-triangle feature-index table lets the scene raycast the merged meshes and resolve the named building/road/area under the pointer.
+- **Detail window**: a minimap drawn client-side from the loaded model lets the user drag a 100–1500 m square; a shader uniform keeps that square sharp and mutes/desaturates the context, with zero OSM requests while moving or resizing. Camera focus fits the square with context margin.
 - **Interaction**: the SPA raycasts on throttled pointer hover and on taps for named-feature tooltips; **Choose area** turns the next click into a new model centre (inverse-projected to WGS84 and generated/cached like any point target); the orientation compass rotates with the camera.
 - **Lights**: sun and moon `DirectionalLight`s + hemisphere ambient. Sun shadows during the day; moon shadows at night under the thresholds above; adaptive orthographic shadow camera for long low-sun shadows; PCFSoft 2048 (1024 low quality).
 - **Palette**: smooth altitude-based interpolation between night / astronomical / nautical / blue hour / golden / day states for background, ambient, fog and light colour. The canvas is transparent over a CSS sky backdrop updated by the UI, so the chrome and the sky always agree.

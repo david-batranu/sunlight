@@ -134,7 +134,7 @@ test('building palette stays in gamut, deterministic and height-aware', () => {
 });
 
 test('road/area/tree palette helpers are deterministic and in gamut', () => {
-  for (const roadClass of [1, 2, 3, 4, 9, 99]) {
+  for (const roadClass of [1, 2, 3, 4, 5, 9, 99]) {
     const color = roadColorFor(roadClass, 0.3);
     for (const channel of color) assert.ok(channel >= 0 && channel <= 1);
   }

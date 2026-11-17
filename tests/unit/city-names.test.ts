@@ -163,8 +163,7 @@ test('fixture city carries landmark building, road and area names', async () => 
     [
       [1, 'Bulevardul Eroilor'],
       [2, 'Strada Republicii'],
-      [3, 'Strada Sforii'],
-      [4, 'Aleea Tineretului']
+      [3, 'Strada Sforii']
     ]
   );
   const rail = model.roads.find((road) => road.c === 9);

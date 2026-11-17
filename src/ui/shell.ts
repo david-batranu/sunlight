@@ -22,6 +22,7 @@ import { createTopBar, type TopBarHandle } from './topbar.ts';
 import { createCompass, type CompassHandle } from './compass.ts';
 import { createFeatureTooltip, type FeatureTooltipHandle } from './tooltip.ts';
 import { createAreaPickHint, type AreaPickHandle } from './area-pick.ts';
+import { createDetailMinimap, type DetailMinimapHandle } from './minimap.ts';
 import { createPatcher, el, on } from './dom.ts';
 import { isShortcutBlocked, matchShortcut } from './shortcuts.ts';
 
@@ -67,6 +68,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
   const compass: CompassHandle = createCompass(ctx);
   const tooltip: FeatureTooltipHandle = createFeatureTooltip(ctx);
   const areaPick: AreaPickHandle = createAreaPickHint(ctx);
+  const detailMinimap: DetailMinimapHandle = createDetailMinimap(ctx);
 
   const progress = createProgressOverlay(ctx, () => openSearch());
   const errorCard = createErrorCard(ctx, { onSearch: () => openSearch() });
@@ -98,6 +100,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
   app.append(
     topbar.element,
     compass.element,
+    detailMinimap.element,
     lightPanel.element,
     lightPanel.scrim,
     timeConsole.element,
@@ -168,6 +171,11 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     if (!action) return;
     if (action === 'close') {
       const state = ctx.store.getState();
+      if (state.detailPanelOpen) {
+        event.preventDefault();
+        ctx.actions.closeDetailPanel();
+        return;
+      }
       if (state.pickingArea) {
         event.preventDefault();
         ctx.actions.cancelAreaPick();
@@ -230,6 +238,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
 
     topbar.update(state);
     compass.update(state);
+    detailMinimap.update(state);
     tooltip.update(state);
     areaPick.update(state);
     timeConsole?.update(state, light);
@@ -248,6 +257,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
       disposeKeyboard();
       topbar.destroy();
       compass.destroy();
+      detailMinimap.destroy();
       tooltip.destroy();
       areaPick.destroy();
       timeConsole?.destroy();

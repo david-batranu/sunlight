@@ -26,6 +26,9 @@ import {
   classifyBuildingType,
   classifyRoad,
   explicitHeightM,
+  hasHikingTags,
+  hasNaturalPathSurface,
+  isMinorPathWay,
   heightPriorFactor,
   isBuilding,
   levelsHeightM,
@@ -241,10 +244,11 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
   for (const way of raw.ways) {
     const tags = way.tags;
     const building = isBuilding(tags);
+    const minorPath = isMinorPathWay(tags);
     const closedCandidate = building || classifyArea(tags) !== 0;
-    const coords = closedCandidate || classifyRoad(tags) !== 0 ? wayCoordinates(way, nodeIndex) : null;
+    const coords = closedCandidate || minorPath || classifyRoad(tags) !== 0 ? wayCoordinates(way, nodeIndex) : null;
     if (!coords) {
-      if (building || classifyArea(tags) !== 0 || classifyRoad(tags) !== 0) {
+      if (building || classifyArea(tags) !== 0 || minorPath || classifyRoad(tags) !== 0) {
         bump('skipped ways without resolved node geometry');
       }
       continue;
@@ -266,6 +270,16 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
       if (consumedWays.has(way.id)) continue;
       const points = coords.map((coord) => projection.project(coord.lat, coord.lon));
       areaWayFeatures.push({ id: `w${way.id}`, tags, kind: classifyArea(tags) as AreaKind, outer: points, holes: [] });
+      continue;
+    }
+
+    if (minorPath) {
+      const points = coords.map((coord) => projection.project(coord.lat, coord.lon));
+      if (isHikingTrail(tags, points, input.terrain, input.radiusM)) {
+        roadFeatures.push({ id: `w${way.id}`, cls: 5, points, tags });
+      } else {
+        bump('dropped pedestrian paths');
+      }
       continue;
     }
 
@@ -547,6 +561,42 @@ function resolveHeightM(
   const base = median(local) ?? globalMedian;
   const jitter = 0.85 + 0.3 * hashUnit(draft.id, 'height');
   return clampNumber(base * heightPriorFactor(type) * jitter, MIN_HEIGHT_M, MAX_HEIGHT_M);
+}
+
+/**
+ * Keeps only pedestrian/footpath ways that read as hiking trails.
+ *
+ * Explicit `sac_scale`/`trail_visibility`/`mtb:scale`/route=hiking tags always
+ * survive. Untagged paths survive when they are natural-surfaced, far enough
+ * from the model centre and actually climbing — this keeps Tâmpa-style trails
+ * while dropping flat asphalt footpaths in parks and on pavements.
+ */
+function isHikingTrail(
+  tags: OsmTags,
+  points: Point[],
+  terrain: BuildInput['terrain'],
+  radiusM: number
+): boolean {
+  if (hasHikingTags(tags)) return true;
+  if (!isValidTerrain(terrain) || !hasNaturalPathSurface(tags)) return false;
+  let length = 0;
+  let gain = 0;
+  let maxDistance = 0;
+  let previousHeight: number | null = null;
+  for (let i = 0; i < points.length; i += 1) {
+    const [x, z] = points[i];
+    maxDistance = Math.max(maxDistance, Math.hypot(x, z));
+    const height = terrainHeightDm(terrain, x * 10, z * 10) / 10;
+    if (previousHeight !== null) {
+      const [px, pz] = points[i - 1];
+      length += Math.hypot(x - px, z - pz);
+      gain += Math.abs(height - previousHeight);
+    }
+    previousHeight = height;
+  }
+  if (length < 20) return false;
+  const meanSlope = gain / length;
+  return maxDistance >= radiusM * 0.25 && (gain >= 6 || meanSlope >= 0.05);
 }
 
 function finalizeRoads(drafts: RoadDraft[]): RoadRecord[] {

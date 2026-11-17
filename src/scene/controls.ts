@@ -5,7 +5,7 @@
  *  - default view                 → isometric from the south-east, NW up
  *  - left-drag (mouse)            → pan on the ground plane
  *  - right/middle-drag, shift-drag → orbit (azimuth 0-360, pitch 18-72°)
- *  - wheel / trackpad-pinch / touch pinch → zoom (0.45x-8x)
+ *  - wheel / trackpad-pinch / touch pinch → zoom (0.45x-32x)
  *  - two-finger drag              → pan while pinching
  *  - double-click / double-tap    → discrete reset to the isometric default
  *
@@ -142,6 +142,15 @@ export class DioramaControls {
       this.x = cx;
       this.z = cz;
     }
+  }
+
+  /** Fits the camera to a world-space target at a requested zoom. */
+  setFocus(centerX: number, centerZ: number, zoom: number): void {
+    const [x, z] = clampTarget(centerX, centerZ, this.bounds);
+    this.desiredX = x;
+    this.desiredZ = z;
+    this.desiredZoom = clampZoom(zoom);
+    this.mode = 'none';
   }
 
   reset(): void {

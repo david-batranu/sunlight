@@ -4,7 +4,7 @@
  */
 
 /** Bumped whenever the persisted model schema or generation semantics change. */
-export const MODEL_VERSION = 3;
+export const MODEL_VERSION = 4;
 
 /** Sky payload schema version. */
 export const SKY_VERSION = 1;
@@ -77,3 +77,11 @@ export const TERRAIN_MAX_REL_M = 160;
 export const TERRAIN_TILE_ZOOM = 14;
 /** Attribution appended to models that contain elevation data. */
 export const TERRAIN_ATTRIBUTION = 'Elevation: AWS Terrain Tiles';
+
+/* ------------------------------------------------------------------ */
+/* Detail window                                                       */
+/* ------------------------------------------------------------------ */
+
+export const DETAIL_MIN_RADIUS_M = 100;
+export const DETAIL_MAX_RADIUS_M = 1500;
+export const DETAIL_DEFAULT_RADIUS_M = 750;

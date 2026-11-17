@@ -19,6 +19,7 @@ const PATHS = {
   compass: '<circle cx="12" cy="12" r="8.6"/><path d="m15.2 8.8-1.9 4.5-4.5 1.9 1.9-4.5 4.5-1.9Z"/>',
   reset: '<path d="M4.4 10.2a8 8 0 1 1 .9 6.4"/><path d="M4.4 4.6v5.6H10"/>',
   info: '<circle cx="12" cy="12" r="8.6"/><path d="M12 10.8v5.4"/><circle cx="12" cy="7.9" r=".9" fill="currentColor" stroke="none"/>',
+  map: '<path d="m3.6 6.4 5.2-2 6.4 2 5.2-2v13.2l-5.2 2-6.4-2-5.2 2V6.4Z"/><path d="M8.8 4.4v13.2M15.2 6.4v13.2"/>',
   link: '<path d="M10.2 13.8a3.4 3.4 0 0 0 4.8 0l2.6-2.6a3.4 3.4 0 0 0-4.8-4.8l-1.3 1.3"/><path d="M13.8 10.2a3.4 3.4 0 0 0-4.8 0l-2.6 2.6a3.4 3.4 0 0 0 4.8 4.8l1.3-1.3"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   chevron: '<path d="m7 10 5 5 5-5"/>',

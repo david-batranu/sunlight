@@ -184,7 +184,7 @@ export function validateCityModel(value: unknown): CityModel {
   if (!Array.isArray(value.roads)) fail('roads must be an array');
   for (const road of value.roads) {
     if (!isRecord(road)) fail('road must be an object');
-    if (!isInteger(road.c) || ![1, 2, 3, 4, 9].includes(road.c as number)) fail('road.c out of range');
+    if (!isInteger(road.c) || ![1, 2, 3, 4, 5, 9].includes(road.c as number)) fail('road.c out of range');
     assertNumberArray(road.p, 'road.p', 4);
     assertOptionalName(road.n, 'road.n');
   }

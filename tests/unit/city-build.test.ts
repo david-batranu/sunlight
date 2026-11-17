@@ -29,8 +29,11 @@ test('builds the fixture city with expected feature counts and kinds', async () 
   assert.equal(model.meta.source, 'fixture');
   assert.equal(model.meta.seed, false);
   assert.equal(model.meta.radiusM, 900);
-  assert.deepEqual(model.meta.stats, { buildings: 12, roads: 5, areas: 7, dropped: 0 });
-  assert.deepEqual(model.meta.warnings, ['ignored courtyard holes in building relations: 1']);
+  assert.deepEqual(model.meta.stats, { buildings: 12, roads: 4, areas: 7, dropped: 0 });
+  assert.deepEqual(model.meta.warnings, [
+    'ignored courtyard holes in building relations: 1',
+    'dropped pedestrian paths: 1'
+  ]);
   assert.match(model.meta.attribution, /OpenStreetMap/);
 
   // Areas: lake way + water relation with island hole + park + forest + grass + 2 plazas.
@@ -48,11 +51,11 @@ test('builds the fixture city with expected feature counts and kinds', async () 
     for (const hole of area.holes ?? []) assert.ok(flatSignedArea(hole) < 0, 'area holes must be CW');
   }
 
-  // Road classes: arterial, secondary, tertiary/local, pedestrian and rail; the
-  // unnamed service road and the tunnel are filtered out.
+  // Road classes: arterial, secondary, tertiary and rail. The unnamed service
+  // road, tunnel and flat pedestrian footway are filtered out.
   assert.deepEqual(
     model.roads.map((road) => road.c).sort((a, b) => a - b),
-    [1, 2, 3, 4, 9]
+    [1, 2, 3, 9]
   );
   for (const road of model.roads) assert.ok(road.p.length >= 4 && road.p.length % 2 === 0);
 });

@@ -2,7 +2,7 @@
  * Tiny observable application store. The lead owns this file.
  */
 
-import type { AppError, CurrentLight, HoverInfo, LoadPhase } from './contracts.ts';
+import type { AppError, CurrentLight, DetailWindow, HoverInfo, LoadPhase } from './contracts.ts';
 import type { CityInfo, CityModel, JobProgress, SkyDay } from '../../shared/types.ts';
 import { DEFAULT_CITY_GEONAME_ID, SEED_BY_GEONAME_ID } from '../../shared/constants.ts';
 
@@ -31,6 +31,10 @@ export interface AppState {
   hover: HoverInfo | null;
   /** True while the user is choosing a new model centre on the diorama. */
   pickingArea: boolean;
+  /** High-quality window inside the loaded model; null means the whole model. */
+  detailWindow: DetailWindow | null;
+  /** True while the minimap detail picker is open. */
+  detailPanelOpen: boolean;
   notices: string[];
   viewerTz: string;
 }
@@ -115,6 +119,8 @@ export function createInitialState(): AppState {
     cameraAzimuthDeg: 135,
     hover: null,
     pickingArea: false,
+    detailWindow: null,
+    detailPanelOpen: false,
     notices: [],
     viewerTz: viewerTimezone()
   };

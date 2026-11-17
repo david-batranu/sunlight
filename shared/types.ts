@@ -63,9 +63,11 @@ export interface BuildingRecord {
   k?: string;
 }
 
-/** 1 arterial, 2 primary, 3 secondary, 4 local/pedestrian, 9 rail. */
+/** 1 arterial, 2 primary, 3 secondary, 4 local/pedestrian, 5 hiking trail, 9 rail. */
+export type RoadClass = 1 | 2 | 3 | 4 | 5 | 9;
+
 export interface RoadRecord {
-  c: number;
+  c: RoadClass;
   p: number[];
   /** Road or street name from OSM. */
   n?: string;
