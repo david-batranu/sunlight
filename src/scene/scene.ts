@@ -40,6 +40,12 @@ import {
   type FeatureMeshInfo
 } from './features.ts';
 import {
+  boundsForPositions,
+  partitionForPicking,
+  selectPickCandidates,
+  type PickBounds
+} from './picking.ts';
+import {
   createLightSample,
   sampleLightInto,
   shadowConfig,
@@ -234,9 +240,21 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let detailWindow: DetailWindow | null = null;
   let disposed = false;
 
-  /** Raycast targets for feature picking (buildings, roads, areas). */
+  /**
+   * Picking broad phase (PR-06). Every pick target registers its XZ footprint
+   * and vertical extent; hitTest selects only the targets whose prism the ray
+   * can reach before raycasting. Roads/areas are split into pick-only
+   * drawRange proxies that share the rendered position buffer, so the spatial
+   * index costs no vertex data and no draw calls (proxies are never rendered).
+   */
+  const PICK_GRID = 3;
   const pickTargets: THREE.Mesh[] = [];
+  const pickBounds: PickBounds[] = [];
+  const pickProxies: THREE.Mesh[] = [];
   const pickInfo = new Map<THREE.Mesh, FeatureMeshInfo>();
+  /** Persistent candidate buffers: hitTest must not allocate per pointer move. */
+  let pickCandidateIndices = new Uint32Array(0);
+  const pickCandidateMeshes: THREE.Mesh[] = [];
   const raycaster = new THREE.Raycaster();
   const pointerNdc = new THREE.Vector2();
 
@@ -340,6 +358,12 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     roadsMesh = null;
     areasMesh = null;
     pickTargets.length = 0;
+    pickBounds.length = 0;
+    // Pick proxies share the rendered position attributes and were never
+    // rendered, so dropping the references is enough (no GL buffers to free).
+    pickProxies.length = 0;
+    pickCandidateMeshes.length = 0;
+    pickCandidateIndices = new Uint32Array(0);
     pickInfo.clear();
   }
 
@@ -534,14 +558,76 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   /* Feature picking                                                   */
   /* ---------------------------------------------------------------- */
 
+  function registerPickTarget(mesh: THREE.Mesh, info: FeatureMeshInfo, bounds: PickBounds): void {
+    pickTargets.push(mesh);
+    pickBounds.push(bounds);
+    pickInfo.set(mesh, info);
+  }
+
   function registerPickMesh(
     mesh: THREE.Mesh | null,
     kind: FeatureKind,
     buffers: MeshBuffers
   ): void {
     if (!mesh || buffers.featureIndices.length === 0) return;
-    pickTargets.push(mesh);
-    pickInfo.set(mesh, { kind, featureIndices: buffers.featureIndices });
+    registerPickTarget(
+      mesh,
+      { kind, featureIndices: buffers.featureIndices },
+      boundsForPositions(buffers.positions)
+    );
+  }
+
+  /**
+   * Conservative bounding sphere for a pick bucket: the bucket XZ bounds are a
+   * superset of its vertices, so the sphere cannot reject a real hit.
+   */
+  function pickBucketSphere(bounds: PickBounds): THREE.Sphere {
+    const centerX = (bounds.minX + bounds.maxX) * 0.5;
+    const centerZ = (bounds.minZ + bounds.maxZ) * 0.5;
+    const halfX = (bounds.maxX - bounds.minX) * 0.5;
+    const halfZ = (bounds.maxZ - bounds.minZ) * 0.5;
+    return new THREE.Sphere(
+      new THREE.Vector3(centerX, 0, centerZ),
+      Math.hypot(halfX, halfZ, bounds.maxAbsY)
+    );
+  }
+
+  /**
+   * Registers a merged mesh as pick targets through an n×n grid of pick-only
+   * proxies: each proxy shares the rendered position attribute + triangle
+   * index and limits `Raycaster` to its bucket with `geometry.drawRange`.
+   * `faceIndex` is the global triangle index in that index buffer, so it maps
+   * through the reordered feature table. Proxies are never rendered, so draw
+   * calls and rendering are unchanged.
+   */
+  function registerPartitionedPick(
+    mesh: THREE.Mesh | null,
+    kind: FeatureKind,
+    buffers: MeshBuffers
+  ): void {
+    if (!mesh || buffers.featureIndices.length === 0) return;
+    const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
+    const partition = position ? partitionForPicking(buffers, PICK_GRID) : null;
+    if (!position || !partition || partition.buckets.length <= 1) {
+      registerPickMesh(mesh, kind, buffers);
+      return;
+    }
+    const indexAttribute = new THREE.BufferAttribute(partition.indices, 1);
+    for (const bucket of partition.buckets) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', position);
+      geometry.setIndex(indexAttribute);
+      geometry.setDrawRange(bucket.start, bucket.count);
+      geometry.boundingSphere = pickBucketSphere(bucket.bounds);
+      const proxy = new THREE.Mesh(geometry, material);
+      proxy.matrixAutoUpdate = false;
+      proxy.updateMatrix();
+      pickProxies.push(proxy);
+      // `faceIndex` for an indexed geometry is the global triangle index in
+      // the shared index buffer (drawRange offsets it), so every bucket maps
+      // through the full reordered feature table.
+      registerPickTarget(proxy, { kind, featureIndices: partition.features }, bucket.bounds);
+    }
   }
 
   function hitTest(clientX: number, clientY: number): HitFeature | null {
@@ -550,7 +636,27 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     if (!ndc) return null;
     pointerNdc.set(ndc[0], ndc[1]);
     raycaster.setFromCamera(pointerNdc, camera);
-    const intersections = raycaster.intersectObjects(pickTargets, false);
+    // Broad phase before the raycast: a candidate mesh can only be hit when the
+    // ray's ground-plane intersection falls inside its XZ footprint expanded by
+    // maxAbsY·|dir.xz/dir.y|. Conservative, so the nearest surface (including
+    // unnamed blocking geometry) is always resolved exactly as before.
+    const ray = raycaster.ray;
+    const candidateCount = selectPickCandidates(
+      pickBounds,
+      ray.origin.x,
+      ray.origin.y,
+      ray.origin.z,
+      ray.direction.x,
+      ray.direction.y,
+      ray.direction.z,
+      pickCandidateIndices
+    );
+    if (candidateCount === 0) return null;
+    for (let i = 0; i < candidateCount; i += 1) {
+      pickCandidateMeshes[i] = pickTargets[pickCandidateIndices[i]];
+    }
+    pickCandidateMeshes.length = candidateCount;
+    const intersections = raycaster.intersectObjects(pickCandidateMeshes, false);
     if (intersections.length === 0) return null;
     // Nearest surface wins; an unnamed face blocks fall-through to features behind.
     const nearest = intersections[0];
@@ -605,8 +711,12 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     roadsMesh = addMesh(buffers.roads, false, true);
     areasMesh = addMesh(buffers.areas, false, true);
     treesMesh = addMesh(buffers.trees, true, true);
-    registerPickMesh(roadsMesh, 'road', buffers.roads);
-    registerPickMesh(areasMesh, 'area', buffers.areas);
+    // Roads/areas are thin but city-wide; pick-only bucket proxies let the
+    // broad phase raycast the handful of buckets near the pointer instead of
+    // their merged ~50k triangles (rendering stays at two draw calls).
+    registerPartitionedPick(roadsMesh, 'road', buffers.roads);
+    registerPartitionedPick(areasMesh, 'area', buffers.areas);
+    pickCandidateIndices = new Uint32Array(pickTargets.length);
     if (treesMesh) treesMesh.visible = QUALITY[quality].showTrees;
 
     modelKey = model.key;

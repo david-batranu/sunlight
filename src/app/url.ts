@@ -86,3 +86,13 @@ export function replaceUrl(target: ModelTarget | null, date: string, minute: num
     /* history may be unavailable in tests */
   }
 }
+
+/** Pushes a new history entry for a user-initiated city/area change. */
+export function pushUrl(target: ModelTarget | null, date: string, minute: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.history.pushState(null, '', buildUrl(target, date, minute));
+  } catch {
+    /* history may be unavailable in tests */
+  }
+}

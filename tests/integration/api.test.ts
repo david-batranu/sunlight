@@ -270,3 +270,16 @@ test('model HTTP contract: HEAD, invalid keys and method handling', async () => 
   assert.equal(headHealth.status, 200);
   assert.equal(await headHealth.text(), '');
 });
+
+test('health exposes bounded HTTP counters and p95 latency', async () => {
+  await fetch(`${app.url}/api/cities?q=brasov`);
+  await fetch(`${app.url}/api/cities?q=cluj`);
+  const response = await fetch(`${app.url}/api/health`);
+  assert.equal(response.status, 200);
+  const health = await response.json();
+  assert.ok(health.http, 'health should include http metrics');
+  assert.ok(health.http.requests >= 2);
+  assert.ok(health.http.errors >= 0);
+  assert.ok(health.http.rateLimited >= 0);
+  assert.ok(health.http.p95Ms >= 0);
+});

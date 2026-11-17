@@ -42,7 +42,7 @@ import {
   minuteNowInTimezone,
   todayInTimezone
 } from './app/time.ts';
-import { parseUrlState, replaceUrl } from './app/url.ts';
+import { parseUrlState, pushUrl, replaceUrl } from './app/url.ts';
 import { createScene } from './scene/scene.ts';
 import { createUI } from './ui/shell.ts';
 
@@ -80,6 +80,8 @@ interface LoadOptions {
   resetToNow?: boolean;
   /** Keep the currently displayed local date/time (area recentering). */
   preserveTime?: boolean;
+  /** Push a browser-history entry instead of replacing the current one. */
+  pushHistory?: boolean;
 }
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
@@ -159,8 +161,12 @@ function skyCacheKey(city: { lat: number; lon: number }, date: string): string {
   return `${city.lat.toFixed(4)}|${city.lon.toFixed(4)}|${date}`;
 }
 
+let pendingHistoryMode: 'replace' | 'push' = 'replace';
+
 function publishUrl(state: AppState): void {
-  replaceUrl(activeTarget, state.date, state.minute);
+  if (pendingHistoryMode === 'push') pushUrl(activeTarget, state.date, state.minute);
+  else replaceUrl(activeTarget, state.date, state.minute);
+  pendingHistoryMode = 'replace';
 }
 
 function setNotices(notices: string[]): void {
@@ -332,6 +338,7 @@ async function applyModel(model: CityModel, token: number, options: LoadOptions 
 async function loadCity(target: ModelTarget, label?: string | null, options: LoadOptions = {}): Promise<void> {
   const token = ++loadToken;
   activeTarget = target;
+  pendingHistoryMode = options.pushHistory ? 'push' : 'replace';
   labelHint = label ?? null;
   activeJobId = null;
   skyToken += 1;
@@ -555,11 +562,11 @@ function playbackTick(now: number): void {
 
 const actions: AppActions = {
   selectCity(target) {
-    void loadCity(target, undefined, { resetToNow: true });
+    void loadCity(target, undefined, { resetToNow: true, pushHistory: true });
   },
 
   selectSearchResult(result) {
-    void loadCity(targetFromSearchResult(result), result.name, { resetToNow: true });
+    void loadCity(targetFromSearchResult(result), result.name, { resetToNow: true, pushHistory: true });
   },
 
   async locate() {
@@ -579,13 +586,13 @@ const actions: AppActions = {
               void loadCity(
                 { kind: 'city', geonameId: nearest.city.geonameId },
                 nearest.city.name,
-                { resetToNow: true }
+                { resetToNow: true, pushHistory: true }
               );
             } else {
               void loadCity(
                 { kind: 'point', lat: latitude, lon: longitude, name: 'My location' },
                 'My location',
-                { resetToNow: true }
+                { resetToNow: true, pushHistory: true }
               );
             }
           } catch (error) {
@@ -766,7 +773,7 @@ const actions: AppActions = {
     void loadCity(
       { kind: 'point', lat: geo.lat, lon: geo.lon, name },
       name,
-      { preserveTime: true }
+      { preserveTime: true, pushHistory: true }
     );
   },
 
@@ -944,6 +951,20 @@ store.subscribe((state, previous) => {
 
 void loadCity(activeTarget, seedLabelForTarget(activeTarget));
 requestAnimationFrame(playbackTick);
+
+// Browser Back/Forward returns to a previous city/area or point deep link.
+// The model is normally already in the cache, so this is a fast reload.
+window.addEventListener('popstate', () => {
+  const parsed = parseUrlState(window.location.search);
+  if (!parsed.target) return;
+  const targetKey = JSON.stringify(parsed.target);
+  if (targetKey === JSON.stringify(activeTarget)) return;
+  if (parsed.date) explicitDate = parsed.date;
+  if (parsed.minute != null) explicitMinute = parsed.minute;
+  userTouchedTime = parsed.minute != null;
+  pendingHistoryMode = 'replace';
+  void loadCity(parsed.target, seedLabelForTarget(parsed.target), { preserveTime: false });
+});
 
 // Debug handle for E2E and manual inspection.
 declare global {

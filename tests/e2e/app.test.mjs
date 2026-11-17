@@ -798,6 +798,19 @@ test('switching cities resets the clock to the new city\'s local now', async () 
       Math.abs(after.minute - expected.minute) <= 5,
       `new city should start near its local now (${after.minute} vs ${expected.minute})`
     );
+
+    // City/area changes push history; Back restores the previous deep link.
+    await page.goBack();
+    await page.waitForFunction(
+      () =>
+        window.__sunlight.getState().city?.geonameId === 683844 &&
+        window.__sunlight.getState().phase === 'ready',
+      null,
+      { timeout: 30_000 }
+    );
+    const restored = await readState(page);
+    assert.equal(restored.date, '1900-01-01', 'Back should restore the previous city/date URL');
+    assert.equal(Math.round(restored.minute), 30);
   });
 });
 

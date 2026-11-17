@@ -327,3 +327,27 @@ test('job errors redact absolute filesystem paths', async () => {
     await queue.shutdown();
   }
 });
+
+test('queued jobs time out instead of polling forever', async () => {
+  const queue = new JobQueue({
+    concurrency: 1,
+    sweepIntervalMs: 10,
+    maxQueuedAgeMs: 20
+  });
+  try {
+    const gate = controlledGate();
+    const active = queue.enqueue('gn-timeout-active', async () => {
+      await gate.promise;
+    });
+    const waiting = queue.enqueue('gn-timeout-waiting', async () => undefined);
+    await waitFor(() => queue.get(waiting.jobId)?.state === 'error', 2000);
+    const failed = queue.get(waiting.jobId);
+    assert.equal(failed?.error?.code, 'QUEUE_TIMEOUT');
+    assert.equal(failed?.error?.retryable, true);
+    assert.equal(queue.queued, 0);
+    gate.release();
+    await waitFor(() => queue.get(active.jobId)?.state === 'done');
+  } finally {
+    await queue.shutdown();
+  }
+});

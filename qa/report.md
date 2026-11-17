@@ -2,14 +2,14 @@
 
 **Date:** 2026-11-17 · **Version:** 0.2.0
 **Environment:** macOS arm64 (Apple M4 Pro), Node v26.13.1, Chrome headless + SwiftShader for E2E.
-**Result:** GREEN — **405/405** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
+**Result:** GREEN — **419/419** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
 
 ## Commands
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | pass (web + server + tests) |
-| `npm test` | **405/405** pass, offline fixtures, ~12 s |
+| `npm test` | **419/419** pass, offline fixtures, ~12 s |
 | `npm run build` | pass; SPA JS ~687 kB raw / ~184 kB gzip, CSS ~53 kB / ~11 kB gzip |
 | `npm run test:e2e` | **29/29** pass, ~76 s, seed-only server, isolated cache, external browser traffic blocked |
 | `docker compose config` | pass (compose v2; read-only container, cache volume, hardened options) |
@@ -64,9 +64,9 @@ Measured E2E (1440×900, SwiftShader): last frame **25 draw calls / 439,467 tria
 
 ## Known limitations / remaining work
 
-- Buildings are split into a 3×3 grid for frustum culling (wide view 25 shadow-inclusive draws, 100 m focus 12 draws / 223k triangles); terrain/roads/areas remain merged, so very high zoom still submits most non-building geometry. A detail-tile/chunked architecture is the next large rendering improvement.
-- Hover picking remains a raycast over the merged meshes (~6 ms on M4 Pro); a footprint grid is planned.
-- Cold load still uploads the full merged geometry; off-main-thread geometry building/transferables are future work.
+- Buildings are split into a 3×3 grid for frustum culling (wide view 25 shadow-inclusive draws, 100 m focus 12 draws / 223k triangles); terrain/roads/areas remain merged, so very high zoom still submits most non-building geometry. Full detail-tile LOD and camera-fitted shadow LOD remain architectural follow-ups.
+- Hover picking uses a conservative spatial broad phase: sampled p95 is ≤1.77 ms in the benchmark harness with **0 mismatches over 10,080 rays**; unnamed blockers still block correctly.
+- Cold load still uploads the full merged geometry; off-main-thread geometry building/transferables are future work. Camera-fitted shadow LOD and full detail-tile terrain LOD are deliberately deferred after a measured cost/benefit analysis (orbit-invariant fit would only gain ~1.35–1.7× texel density and risks wide-view shadow regressions).
 - Real VoiceOver/NVDA/TalkBack, Safari/Firefox, physical touch devices and forced-colors/HCM were not tested in this automated pass.
 - The Area picker still fetches a handful of OSM raster tiles directly from the browser (disclosed in About); an operator running at scale should proxy/self-host or use a commercial tile provider.
-- `qa/shots` remains a tracked binary-artefact directory; moving screenshots to CI artefacts is desirable.
+- Screenshots are generated locally under ignored `qa/shots/` and uploaded as a CI artefact; the README uses small WebP copies in `docs/screenshots/`.

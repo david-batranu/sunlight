@@ -20,22 +20,22 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 
 ## Screenshots
 
-![Brașov at summer noon](qa/shots/brasov-noon.png)
+![Brașov at summer noon](docs/screenshots/brasov-noon.webp)
 *Brașov, 21 June 2026, 13:20 — NW-up diorama, high summer sun over the old town and the forested Tâmpa slope in the foreground.*
 
-![Brașov at golden hour](qa/shots/brasov-golden.png)
+![Brașov at golden hour](docs/screenshots/brasov-golden.webp)
 *The same day at 20:45 — low golden light and 18× long shadows.*
 
-![Brașov by moonlight](qa/shots/brasov-night.png)
+![Brașov by moonlight](docs/screenshots/brasov-night.webp)
 *23:30 — moonlit diorama with a waxing crescent and moon shadows.*
 
-![Mobile layout](qa/shots/brasov-mobile.png)
+![Mobile layout](docs/screenshots/brasov-mobile.webp)
 *Phone layout with a compact top bar and shorter time sheet, leaving more room for the diorama and its controls.*
 
-![5 km area picker](qa/shots/detail-area.png)
+![5 km area picker](docs/screenshots/detail-area.webp)
 *Choose from a 5 km-radius overview: the 3 km loaded city stays sharp, surrounding map context is visible, and the draggable window controls the high-detail square. Moving it costs no OSM data requests.*
 
-![Named feature tooltip](qa/shots/feature-tooltip.png)
+![Named feature tooltip](docs/screenshots/feature-tooltip.webp)
 *Hover or tap a named street or landmark for its placard; the compass in the top-left follows the camera. The UI collapses to a compact top bar and shorter bottom sheet on phones.*
 
 ## Quick start
@@ -231,7 +231,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 405 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 419 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
 
 ## Project layout
 
