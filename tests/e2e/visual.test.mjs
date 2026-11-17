@@ -155,15 +155,13 @@ test('performance smoke at 1440x900 (SwiftShader): merged draw calls, triangles,
     const idle = await readDebug(page);
     assert.equal(idle.render.framesRendered, framesBefore, 'idle scene must not render frames');
     assert.equal(idle.render.rendersPerSecond, 0, 'idle scene should report 0 renders/s');
-    // A new time still wakes the renderer.
-    await page.locator('[data-testid="time-slider"]').evaluate((input) => {
-      input.value = String(Number(input.value) + 5);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await page.waitForTimeout(400);
-    assert.ok(
-      (await readDebug(page)).render.framesRendered > framesBefore,
-      'changing time must render at least one new frame'
+    // A new time still wakes the renderer. Use the public action rather than
+    // synthetic slider events so this is reliable on slow CI runners.
+    await page.evaluate(() => window.__sunlight.actions.stepMinutes(5));
+    await page.waitForFunction(
+      (before) => window.__sunlight.getSceneDebug().render.framesRendered > before,
+      framesBefore,
+      { timeout: 5000 }
     );
   });
 });
