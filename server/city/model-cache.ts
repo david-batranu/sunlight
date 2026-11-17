@@ -96,6 +96,8 @@ export class ModelCache {
   private totalBytes = 0;
   /** Monotonic access counter: LRU ordering that never ties within a run. */
   private accessCounter = 0;
+  /** Serializes eviction passes so concurrent writes can't double-evict. */
+  private evictionTail: Promise<void> = Promise.resolve();
   private readonly pruned: CachePruneStats = {
     mismatchedVersion: 0,
     mismatchedRadius: 0,
@@ -398,7 +400,13 @@ export class ModelCache {
   }
 
   /** Evicts least-recently-used entries until the cache fits (never the protected key). */
-  private async evictToFit(protectedKey: string | null): Promise<void> {
+  private evictToFit(protectedKey: string | null): Promise<void> {
+    const next = this.evictionTail.then(() => this.evictToFitNow(protectedKey));
+    this.evictionTail = next.catch(() => undefined);
+    return next;
+  }
+
+  private async evictToFitNow(protectedKey: string | null): Promise<void> {
     if (!Number.isFinite(this.maxBytes)) return;
     if (this.totalBytes <= this.maxBytes) return;
     const candidates = [...this.entries.values()]

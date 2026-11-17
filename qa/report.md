@@ -2,14 +2,14 @@
 
 **Date:** 2026-11-17 · **Version:** 0.2.0
 **Environment:** macOS arm64 (Apple M4 Pro), Node v26.13.1, Chrome headless + SwiftShader for E2E.
-**Result:** GREEN — **403/403** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
+**Result:** GREEN — **405/405** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
 
 ## Commands
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | pass (web + server + tests) |
-| `npm test` | **403/403** pass, offline fixtures, ~12 s |
+| `npm test` | **405/405** pass, offline fixtures, ~12 s |
 | `npm run build` | pass; SPA JS ~687 kB raw / ~184 kB gzip, CSS ~53 kB / ~11 kB gzip |
 | `npm run test:e2e` | **29/29** pass, ~76 s, seed-only server, isolated cache, external browser traffic blocked |
 | `docker compose config` | pass (compose v2; read-only container, cache volume, hardened options) |
@@ -33,7 +33,7 @@
 - Terrain subdivision reduced, unused vertex normals removed, vertex colours packed to Uint8: ~45% less VBO/upload volume.
 - Debug exposes `framesRendered`, median/p95 frame interval, rendered frames/s, quality and DPR.
 
-Measured E2E (1440×900, SwiftShader): last frame **9 draw calls / 439,467 triangles** including the shadow pass; settled wide view **6 draws / ~245,145 triangles**; idle render **0/s**. Hardware GPU steady state remains 60 fps vsync; true SwiftShader steady cadence is ~5.7 fps (the transient `fps` EMA is replaced by rolling median/p95).
+Measured E2E (1440×900, SwiftShader): last frame **25 draw calls / 439,467 triangles** including the shadow pass; settled wide main pass **14 draws / 245,145 triangles**; a focused 100 m window renders **12 draws / 223,369 triangles** after 3×3 building-chunk frustum culling; idle render **0/s**. Hardware GPU steady state remains 60 fps vsync; true SwiftShader steady cadence is ~5.7 fps (the transient `fps` EMA is replaced by rolling median/p95).
 
 ### Usability / accessibility
 - Area picker now becomes a modal sheet at ≤1180 px wide or ≤620 px tall, so the time console cannot cover it; map is 1:1 and unclipped at 320–430 px widths and 200% zoom.
@@ -64,7 +64,7 @@ Measured E2E (1440×900, SwiftShader): last frame **9 draw calls / 439,467 trian
 
 ## Known limitations / remaining work
 
-- No spatial LOD/frustum chunking yet: a 32× zoom still submits the merged city geometry; a detail-tile/chunked architecture is the next large rendering improvement.
+- Buildings are split into a 3×3 grid for frustum culling (wide view 25 shadow-inclusive draws, 100 m focus 12 draws / 223k triangles); terrain/roads/areas remain merged, so very high zoom still submits most non-building geometry. A detail-tile/chunked architecture is the next large rendering improvement.
 - Hover picking remains a raycast over the merged meshes (~6 ms on M4 Pro); a footprint grid is planned.
 - Cold load still uploads the full merged geometry; off-main-thread geometry building/transferables are future work.
 - Real VoiceOver/NVDA/TalkBack, Safari/Firefox, physical touch devices and forced-colors/HCM were not tested in this automated pass.

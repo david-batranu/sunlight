@@ -231,7 +231,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 403 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 405 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
 
 ## Project layout
 

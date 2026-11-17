@@ -23,7 +23,7 @@ function cacheKey(lat: number, lon: number, date: string): string {
 
 export class SkyDayCache {
   private readonly entries = new Map<string, CachedSkyDay>();
-  private readonly maxEntries = 128;
+  private readonly maxEntries = 512;
 
   get(lat: number, lon: number, date: string): CachedSkyDay {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) {

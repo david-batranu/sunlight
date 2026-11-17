@@ -201,7 +201,7 @@ Errors are structured (`{error:{code,message,retryable,details?}}`). Request bod
 
 - SPA initial payload target < 300 KB gzipped (Three.js + app).
 - Model seed target ≤ 500 KB gzipped; a 20k-building cap and decimetre quantization keep payloads predictable.
-- Rendering: 6 draw calls / ~245k triangles when settled at the wide view (9 / ~439k with the shadow pass on the last invalidation); 0 rendered frames/s while paused/settled; adaptive DPR/shadow quality on phones and low-end devices. A normal city must stay under 25 draw calls and 750k triangles.
+- Rendering: a wide view settles at 14 main-pass draws / ~245k triangles (25 shadow-inclusive on the last invalidation); buildings are split into a 3×3 grid so a focused 100 m detail window frustum-culls to ~12 draws / ~223k triangles; 0 rendered frames/s while paused/settled; adaptive DPR/shadow quality on phones and low-end devices. Shadow-inclusive draw calls stay below 32 and triangles below 750k.
 - Search latency <100 ms server-side; sky computed in milliseconds and cached; model cache hits served as pre-compressed bytes.
 - First generation target under 60 s with Overpass, under ~2 minutes with the tiled OSM fallback; seeds are instant.
 

@@ -21,8 +21,8 @@ const DEFAULT_BASE_URL = 'https://api.openstreetmap.org/api/0.6/map';
 const DEFAULT_SPACING_MS = 350;
 const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_RETRIES = 2;
-const DEFAULT_MAX_TILES = 128;
-const DEFAULT_MAX_DEPTH = 5;
+const DEFAULT_MAX_TILES = 64;
+const DEFAULT_MAX_DEPTH = 4;
 const DEFAULT_MIN_TILE_DEG = 0.001;
 const DEFAULT_MAX_BODY_BYTES = 96 * 1024 * 1024;
 

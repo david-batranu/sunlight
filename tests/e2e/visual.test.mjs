@@ -138,8 +138,8 @@ test('performance smoke at 1440x900 (SwiftShader): merged draw calls, triangles,
     assert.equal(debug.modelKey, BRASOV.key);
     assert.ok(debug.render.drawCalls > 0);
     assert.ok(
-      debug.render.drawCalls <= 13,
-      `draw calls should stay merged (~8), got ${debug.render.drawCalls}`
+      debug.render.drawCalls <= 32,
+      `draw calls should stay bounded (~15 main + shadow chunks), got ${debug.render.drawCalls}`
     );
     assert.ok(
       debug.render.triangles > 200_000 && debug.render.triangles < 750_000,
@@ -163,6 +163,31 @@ test('performance smoke at 1440x900 (SwiftShader): merged draw calls, triangles,
       framesBefore,
       { timeout: 5000 }
     );
+
+    // Detail zoom should frustum-cull most building chunks: far fewer triangles
+    // and no more draw calls than the wide view.
+    const wide = await readDebug(page);
+    await page.locator('[data-testid="area-pick"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-testid="detail-size-input"]');
+      input.value = '100';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const framesAtOpen = await page.evaluate(() => window.__sunlight.getSceneDebug().render.framesRendered);
+    await page.locator('[data-testid="detail-focus"]').click();
+    await page.waitForFunction(
+      (before) => window.__sunlight.getSceneDebug().render.framesRendered > before,
+      framesAtOpen,
+      { timeout: 5000 }
+    );
+    await page.waitForTimeout(800);
+    const focused = await readDebug(page);
+    assert.ok(
+      focused.render.triangles < wide.render.triangles * 0.9,
+      `detail culling should reduce triangles (${focused.render.triangles} vs ${wide.render.triangles})`
+    );
+    assert.ok(focused.render.drawCalls <= wide.render.drawCalls + 1);
   });
 });
 

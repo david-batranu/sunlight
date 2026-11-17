@@ -28,6 +28,7 @@ import {
 } from './camera.ts';
 import { DioramaControls } from './controls.ts';
 import { FrameStats } from './frame-stats.ts';
+import { splitMeshByGrid } from './chunks.ts';
 import {
   buildModelBuffers,
   shadowRadiusFor,
@@ -589,11 +590,21 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     const buffers = buildModelBuffers(model, extents);
     addMesh(buffers.plinth, false, true);
     terrainMesh = addMesh(buffers.terrain, true, true);
-    buildingsMesh = addMesh(buffers.buildings, true, true);
+    // Buildings dominate the triangle count. Partitioning them into a 3×3
+    // grid keeps the wide-view draw budget under 25 while allowing frustum
+    // culling to drop most of the city at detail-window zoom levels.
+    const buildingChunks = splitMeshByGrid(buffers.buildings, 3);
+    buildingsMesh = null;
+    for (const chunk of buildingChunks) {
+      const mesh = addMesh(chunk, true, true);
+      if (mesh) {
+        if (!buildingsMesh) buildingsMesh = mesh;
+        registerPickMesh(mesh, 'building', chunk);
+      }
+    }
     roadsMesh = addMesh(buffers.roads, false, true);
     areasMesh = addMesh(buffers.areas, false, true);
     treesMesh = addMesh(buffers.trees, true, true);
-    registerPickMesh(buildingsMesh, 'building', buffers.buildings);
     registerPickMesh(roadsMesh, 'road', buffers.roads);
     registerPickMesh(areasMesh, 'area', buffers.areas);
     if (treesMesh) treesMesh.visible = QUALITY[quality].showTrees;
