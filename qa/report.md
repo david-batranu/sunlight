@@ -14,14 +14,14 @@ Scope: real headless-Chrome E2E, visual QA, accessibility basics, performance sm
 ## Commands
 
 ```bash
-npm test                          # unit + integration, offline fixtures: 316/316
+npm test                          # unit + integration, offline fixtures: 317/317
 npm run test:e2e                  # build + seed-only server + Chrome: 24/24
 E2E_SKIP_BUILD=1 npm run test:e2e # reuse current build (~53 s)
 ```
 
 Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs` (screenshots, visual, perf, a11y), helpers in `tests/e2e/helpers.mjs`; node:test + playwright-core.
 
-## Result: GREEN — 24/24 E2E checks pass, 0 fail; 316/316 unit + integration tests pass
+## Result: GREEN — 24/24 E2E checks pass, 0 fail; 317/317 unit + integration tests pass
 
 | # | Check | Result |
 |---|-------|--------|
@@ -39,8 +39,8 @@ Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs` (scree
 | 12 | Mobile 390×844: controls visible/in-viewport, no horizontal overflow, touch targets | PASS |
 | 13 | **Wide terrain model**: 1500 m radius → 5,000+ buildings, named landmarks/roads, 49×49 heightfield with 113.5 m relief; NW-up default (compass NW toward the top), compass rotates with camera and resets the view; 32× zoom available; 41 hiking trails retained | PASS |
 | 14 | **Feature tooltips**: hover shows the named feature under the pointer, click pins it with a close button, Escape dismisses | PASS |
-| 15 | **Choose area**: button enables, pressed state, hint banner, body crosshair state, Cancel + Escape exit the mode | PASS (manual full recenter verified against the fixture provider: new `pt-…` model, city “Near Brașov”, date/time preserved) |
-| 15b | **Detail area minimap**: opens over the cached model, 300 m resize zooms the camera, dragging the frame moves the detail window, Escape closes, no model reload | PASS |
+| 15 | **Area picker**: one top-bar button opens the 5 km overview, pressed state, detail canvas and Load area visible; Escape closes; old click-to-recenter mode is gone | PASS |
+| 15b | **Detail window**: opens at the wide context view, 300 m resize does not move the camera, Focus zooms to the window, dragging moves it, Escape closes, no model reload | PASS |
 | 16 | **City switch → new city's local now**: historical deep link then switch to Cluj → local today and current minute | PASS |
 | 17–19 | Canonical screenshots, mobile screenshot, brightness ordering | PASS |
 | 20 | Performance smoke (9 draw calls, 574k scene triangles incl. shadow pass, terrain included) | PASS |
@@ -54,13 +54,13 @@ No page errors or console errors in any of the 23 browser runs.
 
 | File | State |
 |------|-------|
-| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide NW-up diorama, terrain (Tâmpa in the foreground), compass, Choose area, Detail |
+| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide NW-up diorama, terrain (Tâmpa in the foreground), compass, Area picker |
 | `brasov-golden.png` | 20:45, sun 3.1° WNW, long shadows across the terrain |
 | `brasov-night.png` | 23:30, sun −16°, moonlight |
 | `brasov-mobile.png` | 390×844 @2×, noon, compact compass + 218 px bottom sheet |
 | `brasov-morning.png` | 07:30, sun 18.4° ENE — opposite shadow direction evidence (re-run if present) |
 | `feature-tooltip.png` | pinned tooltip for “Strada Poarta Șchei · Primary street” |
-| `detail-area.png` | detail-window minimap at 300 m radius; muted context outside the selected square |
+| `detail-area.png` | 5 km area overview at 300 m radius; surrounding OSM context, loaded-city footprint and the selected high-detail square |
 
 
 Visual review: composition and warm placard design remain coherent; panels do not clip at 1440×900; compass sits clear of the top bar/light panel/time console; tooltip is legible and flips/clamps at the viewport edge; no shadow acne, peter-panning or missing contact; noon shadows short/north, golden-hour shadows long/east, morning shadows opposite. Night is legible but intentionally dark.
@@ -79,7 +79,7 @@ Visual review: composition and warm placard design remain coherent; panels do no
 |-----|------|-------|
 | Minor | Visual, mobile | Portrait 390×844 fits the full wide base, so the diorama can read small with empty sky; portrait-specific framing is a follow-up. |
 | Minor | Terrain | Terrain is a single 49 × 49 heightfield, 0.3× exaggerated and capped at 160 m; cliffs, bridges and precise summits outside the 3 km square are not modelled. Steep forests are painted into the terrain rather than drape meshes. |
-| Info | Detail window | Outside the detail square is muted/desaturated at render time rather than a separate geometry LOD; triangle count and API cost are unchanged while the window moves. |
+| Info | Area picker | The 5 km overview is a one-time OSM raster tile layer (browser-cached; © OpenStreetMap contributors) with a loaded-model fallback offline. The 3D diorama remains the loaded 3 km model; Load area builds a new 3 km model at the selected point. Outside the detail square is muted/desaturated at render time rather than a separate geometry LOD, so triangle count and API cost are unchanged while the window moves. |
 | Info | Trails | Flat pedestrian footpaths are filtered out; steep/natural or explicitly tagged hiking trails remain as class 5. |
 | Minor | Perf | FPS must be re-checked on a hardware GPU; the SwiftShader number is a smoke test. |
 | Info | E2E | Choose-area full recentering is verified manually against a fixture-capable server; the automated E2E server is seed-only, so the test covers the UI/mode contract only. |
@@ -87,4 +87,4 @@ Visual review: composition and warm placard design remain coherent; panels do no
 
 ## Recommendation
 
-Accept the v4 pass: real elevation, a NW-up default view, wide 3 km models, landmark/road tooltips, orientation compass, city-local-now switching, hiking-trail preservation, and a draggable 100–1500 m detail window with zero API cost while moving/resizing within the loaded city are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.
+Accept the v4 pass: real elevation, a NW-up default view, wide 3 km models, landmark/road tooltips, orientation compass, city-local-now switching, hiking-trail preservation, and a combined 5 km area picker with a draggable 100–1500 m detail window (Focus now visibly fits the camera; moving the window within the loaded city costs zero OSM data requests) are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.

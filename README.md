@@ -7,16 +7,16 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 ## Features
 
 - **Any city** — search a bundled index of ~65,000 populated places, or let the browser locate the nearest one. A custom “my exact location” point is supported too.
-- **Explore wider** — each city model covers a 3 km × 3 km core by default, and **Choose area** lets you recenter the diorama on any point you click. Switching cities always starts at that city’s current local date and time.
+- **Explore wider** — each city model covers a 3 km × 3 km core by default. The **Area** picker opens a **5 km-radius overview** so you can see the surrounding region, drag a high-detail window and load/recenter the diorama at any chosen point. Switching cities always starts at that city’s current local date and time.
 - **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **NW-up** and you can zoom from the whole city down to a few blocks (**0.45×–32×**).
-- **Focus without reloading** — a **Detail** minimap lets you drag a high-quality window across the loaded city and resize it from **100 m to 1500 m radius**. Outside the window stays visible but muted and lower-detail; moving it makes no OSM requests and rebuilds nothing.
+- **Focus without reloading** — the **Area** picker shows a 5 km-radius overview with surrounding OSM map context, plus a draggable high-quality window from **100 m to 1500 m radius**. Inside the loaded city, moving or resizing it is instant and makes no OSM data requests; **Focus** fits the camera with context around the window. **Load area** builds a fresh high-detail model where you point, combining area selection and detail in one tool.
 - **Real geometry & elevation** — the server fetches OpenStreetMap building footprints, major/local roads, water, parks, hiking trails and railways, then samples public elevation tiles so hills, river valleys and mountains such as Brașov's Tâmpa shape the diorama instead of rendering as flat parks. The result is a compact low-poly model of a 3 km × 3 km city core with names and landmark metadata baked in. Terrain is baked into the seed models and cached with live models; if an elevation source is unreachable the model gracefully falls back to flat ground.
 - **Real light** — solar and lunar altitude/azimuth computed with `astronomy-engine`; real-time sun and moon shadows on the model, twilight transitions, moon phase brightness and polar day/night handling.
 - **Time travel** — any local date 1900–2100 and minute of day; play/pause at 1×–60× simulated minutes per second, loop a day, or jump to sunrise/sunset/golden hour.
 - **Cached once, served forever** — the first visit to a city generates it on the server; the gzipped model is persisted to a disk cache (Docker volume) and served immutably afterwards.
 - **Seeded for a fast first run** — eight Romanian cities ship pre-baked: Brașov (default), București, Cluj-Napoca, Timișoara, Iași, Constanța, Sibiu and Oradea.
 - **Warm collector’s-diorama design** — crafted plinth, cream placards, terracotta/gold accents, and a sky backdrop that shifts from daylight to golden hour to moonlit night.
-- **Works offline for seeded cities** — no API key, no external database.
+- **Works offline for seeded cities** — no API key, no external database. The optional 5 km area-map tiles fall back to the loaded model when offline.
 
 ## Screenshots
 
@@ -32,8 +32,8 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 ![Mobile layout](qa/shots/brasov-mobile.png)
 *Phone layout with a compact top bar and shorter time sheet, leaving more room for the diorama and its controls.*
 
-![Detail area minimap](qa/shots/detail-area.png)
-*Drag the detail frame or resize it: the selected square stays sharp while the rest of the loaded city becomes muted context — no API calls.*
+![5 km area picker](qa/shots/detail-area.png)
+*Choose from a 5 km-radius overview: the 3 km loaded city stays sharp, surrounding map context is visible, and the draggable window controls the high-detail square. Moving it costs no OSM data requests.*
 
 ![Named feature tooltip](qa/shots/feature-tooltip.png)
 *Hover or tap a named street or landmark for its placard; the compass in the top-left follows the camera. The UI collapses to a compact top bar and shorter bottom sheet on phones.*
@@ -214,7 +214,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (24/24 E2E checks green; unit + integration suite 316 tests).
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (24/24 E2E checks green; unit + integration suite 317 tests).
 
 ## Project layout
 
@@ -233,7 +233,7 @@ qa/             Screenshots and QA notes
 
 - Elevation is real but deliberately simplified and 0.3× vertically exaggerated; bridges and fine terrain detail are not modelled. This is a diorama, not a survey model.
 - On narrow portrait screens the diorama deliberately fits the full base, so some sky remains above/below; a portrait-specific camera framing is a follow-up.
-- 3 km core per city by default; surrounding districts are not included. Use **Choose area** to recenter the model on a different part of the city.
+- 3 km core per city by default; surrounding districts are not included. The 5 km area picker only shows surrounding map context; use **Load area** to build a high-detail model at a different point.
 - Height tags are sparse in OSM, so most buildings receive an inferred height (local median + building type + deterministic variation), not a surveyed one.
 - Clear-sky lighting only: no weather or clouds.
 - Dates are limited to 1900–2100. Timezone/DST data outside the modern tzdb era is best-effort.

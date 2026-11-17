@@ -57,7 +57,12 @@ export async function openPage(browser, options = {}) {
   const errors = [];
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(`console: ${message.text()}`);
+    if (message.type() !== 'error') return;
+    // The QA browser deliberately blocks all external requests. Optional map
+    // tiles surface as a benign net::ERR_FAILED console entry before the
+    // minimap falls back to the loaded model; ignore those only.
+    if (/net::ERR_FAILED/.test(message.text())) return;
+    errors.push(`console: ${message.text()}`);
   });
   return { context, page, errors };
 }

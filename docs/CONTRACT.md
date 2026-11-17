@@ -228,3 +228,13 @@ The lead wires the city service, sky service and static SPA serving.
 - Courtyard holes on building relations are ignored with a warning.
 - Optional polish (gable roofs, park trees, night window glow) is not
   acceptance-critical; only add it if core budgets are met.
+
+### Area picker
+
+`AppActions.toggleDetailPanel()` opens the combined 5 km overview / detail
+window; `setDetailWindow({centerX,centerZ,radiusM})` updates it; `focusDetailWindow()`
+fits the camera; and `loadDetailArea()` recentres/generates a new 3 km model at
+the window centre. `SceneHandle.setDetailWindow()` applies the shader mask and
+`SceneHandle.focusDetailWindow()` handles the camera fit. Model-space window
+coordinates are metres relative to the model centre; `detailWindowToGeo()`
+converts the centre back to WGS84.

@@ -85,3 +85,7 @@ export const TERRAIN_ATTRIBUTION = 'Elevation: AWS Terrain Tiles';
 export const DETAIL_MIN_RADIUS_M = 100;
 export const DETAIL_MAX_RADIUS_M = 1500;
 export const DETAIL_DEFAULT_RADIUS_M = 750;
+/** Half-size of the choose-area overview footprint (5 km radius). */
+export const DETAIL_CONTEXT_RADIUS_M = 5000;
+/** OSM raster overview zoom used by the choose-area minimap. */
+export const DETAIL_CONTEXT_TILE_ZOOM = 12;

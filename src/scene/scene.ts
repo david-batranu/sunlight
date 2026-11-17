@@ -528,8 +528,13 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
 
   function focusDetailWindow(window: DetailWindow): void {
     if (disposed) return;
-    // Keep context visible around the selected square; clamp by ZOOM_MAX.
-    const desiredHeight = Math.max(140, window.radiusM * 2 * 1.35);
+    // Show the selected square with surrounding context, but never pull the
+    // camera so far back that it shows empty space beyond the loaded model.
+    const modelRadius = currentModel?.meta.radiusM ?? 1500;
+    const desiredHeight = Math.min(
+      Math.max(360, window.radiusM * 2 * 2.4),
+      modelRadius * 2 * 1.05
+    );
     const zoom = Math.max(0.45, Math.min(32, (halfHeight * 2) / desiredHeight));
     controls.setFocus(window.centerX, window.centerZ, zoom);
   }

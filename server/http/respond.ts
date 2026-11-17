@@ -18,7 +18,7 @@ export const CONTENT_SECURITY_POLICY = [
   "base-uri 'none'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://tile.openstreetmap.org",
   "font-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "script-src 'self'",

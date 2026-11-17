@@ -384,7 +384,7 @@ test('mobile 390x844: key controls visible, usable, no horizontal overflow', asy
           '[data-testid="city-chip"]',
           '[data-testid="open-search"]',
           '[data-testid="locate"]',
-          '[data-testid="detail-open"]',
+          '[data-testid="area-pick"]',
           '[data-testid="about-open"]',
           '[data-testid="time-readout"]',
           '[data-testid="date-input"]',
@@ -429,20 +429,28 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
   await withPage(async ({ page }) => {
     await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
 
-    await page.locator('[data-testid="detail-open"]').click();
+    await page.locator('[data-testid="area-pick"]').click();
     await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
     assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), true);
     const opened = await readState(page);
     assert.ok(opened.detailWindow, 'opening the panel should create a detail window');
     assert.ok(opened.detailWindow.radiusM >= 100 && opened.detailWindow.radiusM <= 1500);
+    const openedZoom = await page.evaluate(() => window.__sunlight.getSceneDebug().camera.zoom);
+    assert.equal(openedZoom, 1, 'opening the area picker should keep the wide context view');
 
-    // Resize to a 300 m radius; the camera should zoom to fit it.
+    // Resizing only changes the window; Focus explicitly moves the camera.
     await page.locator('[data-testid="detail-size-input"]').evaluate((input) => {
       input.value = '300';
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
     });
     await page.waitForFunction(() => window.__sunlight.getState().detailWindow?.radiusM === 300);
+    assert.equal(
+      await page.evaluate(() => window.__sunlight.getSceneDebug().camera.zoom),
+      openedZoom,
+      'resizing must not move the camera before Focus'
+    );
+    await page.locator('[data-testid="detail-focus"]').click();
     await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom > 1.1, null, {
       timeout: 5000
     });
@@ -558,25 +566,27 @@ test('hover and tap tooltips identify named city features', async () => {
   });
 });
 
-test('choose-area mode exposes a cancelable pick hint', async () => {
+test('area picker combines the 5 km overview with the detail window', async () => {
   await withPage(async ({ page }) => {
     await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
     const button = page.locator('[data-testid="area-pick"]');
     await button.waitFor({ state: 'visible' });
     await button.click();
-    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === true);
-    assert.equal(await page.locator('[data-testid="area-pick-hint"]').isVisible(), true);
-    assert.equal(await page.evaluate(() => document.body.dataset.picking), 'true');
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
     assert.equal(await button.getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), true);
+    assert.equal(await page.locator('[data-testid="detail-canvas"]').isVisible(), true);
+    assert.equal(await page.locator('[data-testid="detail-load"]').isVisible(), true);
+    const status = await page.locator('[data-testid="detail-status"]').innerText();
+    assert.match(status, /Within the loaded city/);
+    // Loading map context is best-effort; the offline QA browser falls back to
+    // the loaded model rather than failing the page.
+    assert.equal(await page.locator('[data-testid="detail-size-input"]').getAttribute('max'), '1500');
 
-    await page.locator('[data-testid="area-pick-cancel"]').click();
-    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === false);
-    assert.equal(await page.locator('[data-testid="area-pick-hint"]').isVisible(), false);
-
-    await button.click();
-    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === true);
     await page.keyboard.press('Escape');
-    await page.waitForFunction(() => window.__sunlight.getState().pickingArea === false);
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === false);
+    assert.equal(await button.getAttribute('aria-pressed'), 'false');
+    assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), false);
   });
 });
 

@@ -54,6 +54,8 @@ export interface AppActions {
   closeDetailPanel(): void;
   setDetailWindow(window: DetailWindow): void;
   focusDetailWindow(): void;
+  /** Recenters/generates the high-detail model at the selected detail window. */
+  loadDetailArea(): void;
   beginAreaPick(): void;
   cancelAreaPick(): void;
   dismissHover(): void;

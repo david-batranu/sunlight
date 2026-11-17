@@ -17,6 +17,7 @@ import type {
   SkyDay
 } from '../shared/types.ts';
 import {
+  DETAIL_CONTEXT_RADIUS_M,
   DETAIL_DEFAULT_RADIUS_M,
   SEED_BY_GEONAME_ID,
   DEFAULT_CITY_GEONAME_ID
@@ -24,7 +25,11 @@ import {
 import type { AppActions, CurrentLight, DetailWindow, SceneHandle, UIContext } from './app/contracts.ts';
 import { ApiRequestError, createApi } from './app/api.ts';
 import { createInitialState, createStore, type AppState } from './app/state.ts';
-import { clampDetailWindow as clampDetailWindowInFrame, type DetailFrame } from './app/detail.ts';
+import {
+  clampDetailWindow as clampDetailWindowInFrame,
+  detailWindowToGeo,
+  type DetailFrame
+} from './app/detail.ts';
 import {
   addDays,
   clampDate,
@@ -44,14 +49,15 @@ const HOVER_THROTTLE_MS = 70;
 const STICKY_TOOLTIP_MS = 5000;
 const METRES_PER_DEGREE = 111_320;
 
-function currentModelDetailFrame(): { centerX: number; centerZ: number; radiusM: number } | null {
+function currentModelDetailFrame(): DetailFrame | null {
   const model = store.getState().model;
   if (!model) return null;
   const bounds = model.bounds;
   return {
     centerX: (bounds.minX + bounds.maxX) / 20,
     centerZ: (bounds.minZ + bounds.maxZ) / 20,
-    radiusM: model.meta.radiusM
+    modelRadiusM: model.meta.radiusM,
+    contextRadiusM: DETAIL_CONTEXT_RADIUS_M
   };
 }
 
@@ -64,7 +70,7 @@ function clampDetailWindow(input: DetailWindow): DetailWindow | null {
 function defaultDetailWindow(): DetailWindow | null {
   const frame = currentModelDetailFrame();
   if (!frame) return null;
-  const radiusM = Math.min(DETAIL_DEFAULT_RADIUS_M, frame.radiusM);
+  const radiusM = Math.min(DETAIL_DEFAULT_RADIUS_M, frame.modelRadiusM);
   return clampDetailWindow({ centerX: frame.centerX, centerZ: frame.centerZ, radiusM });
 }
 
@@ -677,13 +683,17 @@ const actions: AppActions = {
     if (!window) return;
     store.setState({ detailPanelOpen: true, detailWindow: window, pickingArea: false, hover: null });
     scene.setDetailWindow(window);
-    scene.focusDetailWindow(window);
+    // Start from the wide city view so the selected window has visible context.
+    scene.resetCamera();
+    store.setState({ cameraAzimuthDeg: scene.getCameraAzimuth() });
   },
 
   closeDetailPanel() {
     if (!store.getState().detailPanelOpen && !store.getState().detailWindow) return;
     store.setState({ detailPanelOpen: false, detailWindow: null });
     scene.setDetailWindow(null);
+    scene.resetCamera();
+    store.setState({ cameraAzimuthDeg: scene.getCameraAzimuth() });
   },
 
   setDetailWindow(window) {
@@ -698,6 +708,17 @@ const actions: AppActions = {
     if (!window) return;
     scene.setDetailWindow(window);
     scene.focusDetailWindow(window);
+  },
+
+  loadDetailArea() {
+    const state = store.getState();
+    if (state.phase !== 'ready' || !state.model || !state.city || !state.detailWindow) return;
+    const geo = detailWindowToGeo(state.city, state.detailWindow);
+    void loadCity(
+      { kind: 'point', lat: geo.lat, lon: geo.lon, name: 'Selected area' },
+      'Selected area',
+      { preserveTime: true }
+    );
   },
 
   beginAreaPick() {
