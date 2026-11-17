@@ -3573,3 +3573,35 @@
     height: 44px;
   }
 }
+
+/* One-time touch gesture hint above the mobile time sheet. */
+.sl-gesture-hint {
+  position: fixed;
+  bottom: calc(234px + var(--safe-bottom));
+  left: 50%;
+  z-index: var(--z-hud, 30);
+  max-width: calc(100vw - 24px);
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(30, 23, 16, 0.9);
+  color: #f8f2e5;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.sl-gesture-hint strong {
+  color: var(--gold-400);
+}
+
+@media (min-width: 681px), (pointer: fine) {
+  .sl-gesture-hint {
+    display: none !important;
+  }
+}

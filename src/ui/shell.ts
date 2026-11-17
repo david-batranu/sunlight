@@ -38,6 +38,31 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
   app.dataset.areaMode = 'panel';
   root.replaceChildren(app);
 
+  const gestureHint = el(
+    'div',
+    'sl-gesture-hint',
+    'Drag to pan · Pinch to zoom · <strong>Area</strong> to choose a square'
+  );
+  gestureHint.dataset.testid = 'gesture-hint';
+  gestureHint.hidden = true;
+  let gestureDismissed = false;
+  try {
+    gestureDismissed = window.localStorage.getItem('sunlight.gestureHintDismissed') === '1';
+  } catch {
+    /* storage may be unavailable */
+  }
+  const dismissGestureHint = (): void => {
+    if (gestureDismissed) return;
+    gestureDismissed = true;
+    try {
+      window.localStorage.setItem('sunlight.gestureHintDismissed', '1');
+    } catch {
+      /* ignore */
+    }
+    gestureHint.hidden = true;
+  };
+  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+
   let search: SearchDialogHandle | null = null;
   let about: AboutDialogHandle | null = null;
   let timeConsole: TimeConsoleHandle | null = null;
@@ -117,6 +142,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     lightPanel.element,
     lightPanel.scrim,
     timeConsole.element,
+    gestureHint,
     tooltip.element,
     notices.element,
     appStatus,
@@ -137,6 +163,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     lightPanel.element,
     lightPanel.scrim,
     timeConsole.element,
+    gestureHint,
     tooltip.element,
   ];
   let lastInert: InertMode = 'none';
@@ -246,6 +273,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     runAction(action);
   };
   const disposeKeyboard = on(document, 'keydown', onKeyDown as EventListener);
+  const disposeGestureHint = on(document, 'pointerdown', dismissGestureHint);
 
   /* ------------------------------------------------------------------ */
   /* State rendering                                                    */
@@ -303,6 +331,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     app.dataset.playing = state.playing ? 'true' : 'false';
     app.dataset.loading = state.phase === 'ready' ? 'false' : 'true';
     const panelOpen = state.detailPanelOpen;
+    gestureHint.hidden = !(coarsePointer && !gestureDismissed && state.phase === 'ready' && !panelOpen);
     app.dataset.area = panelOpen ? 'open' : 'closed';
     app.dataset.areaMode = areaPanelMode(window.innerWidth, window.innerHeight);
 
@@ -331,6 +360,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     destroy(): void {
       destroyed = true;
       disposeKeyboard();
+      disposeGestureHint();
       disposeResize();
       topbar.destroy();
       compass.destroy();

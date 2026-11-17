@@ -24,7 +24,7 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 *Brașov, 21 June 2026, 13:20 — NW-up diorama, high summer sun over the old town and the forested Tâmpa slope in the foreground.*
 
 ![Brașov at golden hour](docs/screenshots/brasov-golden.webp)
-*The same day at 20:45 — low golden light and 18× long shadows.*
+*The same day at 20:45 — low golden light across the old town and Tâmpa.*
 
 ![Brașov by moonlight](docs/screenshots/brasov-night.webp)
 *23:30 — moonlit diorama with a waxing crescent and moon shadows.*
