@@ -54,7 +54,7 @@ jobs:
 
       - name: Set up Chrome
         id: chrome
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
 
       - name: Browser E2E
         run: npm run test:e2e
