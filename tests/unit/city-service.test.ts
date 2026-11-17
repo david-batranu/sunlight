@@ -7,18 +7,21 @@
  */
 
 import assert from 'node:assert/strict';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import type { CityService } from '../../server/city/contract.ts';
+import type { CityService, CityServiceHealth } from '../../server/city/contract.ts';
 import { CityError } from '../../server/city/errors.ts';
-import { createCityService } from '../../server/city/service.ts';
+import { createCityService, type CityServiceOptions } from '../../server/city/service.ts';
+import type { ProviderChain } from '../../server/city/providers/chain.ts';
+import type { CitySource, JobStatus } from '../../shared/types.ts';
 import { MODEL_VERSION } from '../../shared/constants.ts';
-import type { JobStatus } from '../../shared/types.ts';
 import {
   BRASOV_CITY,
   FIXED_TIMESTAMP,
   cityKey,
+  loadRawCityFixture,
   makeTempDir,
   makeTestConfig,
   pointKey,
@@ -34,10 +37,11 @@ function delay(ms: number): Promise<void> {
 
 async function withService(
   overrides: Parameters<typeof makeTestConfig>[1],
-  run: (service: CityService, dir: string) => Promise<void>
+  run: (service: CityService, dir: string) => Promise<void>,
+  options: CityServiceOptions = {}
 ): Promise<void> {
   const dir = await makeTempDir('sunlight-service-');
-  const service = createCityService(makeTestConfig(dir, overrides));
+  const service = createCityService(makeTestConfig(dir, overrides), options);
   try {
     await service.init();
     await run(service, dir);
@@ -45,6 +49,45 @@ async function withService(
     await service.shutdown();
     await removeTempDir(dir);
   }
+}
+
+async function withServiceOptions(
+  overrides: Parameters<typeof makeTestConfig>[1],
+  options: CityServiceOptions,
+  run: (service: CityService, dir: string) => Promise<void>
+): Promise<void> {
+  return withService(overrides, run, options);
+}
+
+/** Provider chain that fails every fetch and counts upstream attempts. */
+function failingChain(counter: { calls: number }): ProviderChain {
+  return {
+    canGenerate: true,
+    async fetchRaw() {
+      counter.calls += 1;
+      throw new CityError('PROVIDER_FAILED', 'upstream is down', 502, true);
+    },
+    statuses: () => ({ overpass: 'down' }),
+    shutdown() {
+      /* no-op */
+    }
+  };
+}
+
+/** Provider chain returning the bundled fixture raw data with a delayed fetch. */
+function delayedFixtureChain(delayMs = 0): ProviderChain {
+  return {
+    canGenerate: true,
+    async fetchRaw() {
+      const raw = await loadRawCityFixture();
+      if (delayMs > 0) await delay(delayMs);
+      return raw;
+    },
+    statuses: () => ({ fixture: 'up' }),
+    shutdown() {
+      /* no-op */
+    }
+  };
 }
 
 async function waitForJob(service: CityService, jobId: string, timeoutMs = 5000): Promise<JobStatus> {
@@ -373,5 +416,267 @@ test('point nearby-city naming and country come from the index', async () => {
     assert.equal(far.city.country, '');
     assert.match(far.city.name, /^0\.000, 0\.000$/);
     assert.ok(far.city.tz.length > 0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Health / readiness                                                  */
+/* ------------------------------------------------------------------ */
+
+test('health exposes readiness, checks and worker state', async () => {
+  await withService({}, async (service) => {
+    const health: CityServiceHealth = service.health();
+    assert.equal(health.ready, true);
+    assert.equal(health.degraded, false);
+    // In this repository the worker entry (`server/city/worker.ts`) exists.
+    assert.deepEqual(health.worker, { enabled: true, disabled: false, fallbacks: 0 });
+    assert.deepEqual(
+      health.checks.map((check) => check.name),
+      ['cache', 'seeds', 'generation', 'worker', 'queue']
+    );
+    assert.ok(health.checks.every((check) => check.ok));
+  });
+});
+
+test('a service with no model source is not ready', async () => {
+  await withService({ citySource: 'seed', seedsOnly: true }, async (service) => {
+    const health = service.health();
+    assert.equal(health.ready, false);
+    assert.equal(health.degraded, true);
+    const generation = health.checks.find((check) => check.name === 'generation');
+    assert.equal(generation?.ok, false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Worker boot failure                                                 */
+/* ------------------------------------------------------------------ */
+
+test('a worker that throws while booting falls back in-process exactly once', async () => {
+  const dir = await makeTempDir('sunlight-worker-');
+  const logPath = path.join(dir, 'worker-starts.log');
+  const workerPath = path.join(dir, 'worker-throw.mjs');
+  await writeFile(
+    workerPath,
+    [
+      "import { appendFileSync } from 'node:fs';",
+      `appendFileSync(${JSON.stringify(logPath)}, 'start\\n');`,
+      "throw new Error('synthetic worker boot failure');"
+    ].join('\n')
+  );
+  const service = createCityService(makeTestConfig(dir), { workerEntry: workerPath });
+  try {
+    await service.init();
+    const first = await service.ensureModel({ kind: 'city', geonameId: 683844 });
+    assert.equal(first.state, 'queued');
+    if (first.state === 'queued') {
+      const status = await waitForJob(service, first.jobId);
+      assert.equal(status.state, 'done', JSON.stringify(status));
+    }
+    const health = service.health();
+    assert.equal(health.worker.disabled, true);
+    assert.equal(health.worker.fallbacks, 1);
+    assert.equal(health.degraded, true);
+    const workerCheck = health.checks.find((check) => check.name === 'worker');
+    assert.equal(workerCheck?.ok, false);
+
+    // A later generation must use the in-process path directly (no retry loop).
+    const second = await service.ensureModel({ kind: 'point', lat: 45.66, lon: 25.62 });
+    if (second.state === 'queued') {
+      const status = await waitForJob(service, second.jobId);
+      assert.equal(status.state, 'done', JSON.stringify(status));
+    }
+    const starts = (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean);
+    assert.equal(starts.length, 1, 'the broken worker must not be started again');
+    assert.ok(await service.readModel(cityKey(683844)), 'fallback build still produced a model');
+  } finally {
+    await service.shutdown();
+    await removeTempDir(dir);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Negative cache                                                      */
+/* ------------------------------------------------------------------ */
+
+test('a recently failed model key is not retried against upstream immediately', async () => {
+  const dir = await makeTempDir('sunlight-service-');
+  const counter = { calls: 0 };
+  const service = createCityService(makeTestConfig(dir), { providerChain: failingChain(counter) });
+  try {
+    await service.init();
+    const ensured = await service.ensureModel({ kind: 'city', geonameId: 683844 });
+    assert.equal(ensured.state, 'queued');
+    if (ensured.state !== 'queued') return;
+    const status = await waitForJob(service, ensured.jobId);
+    assert.equal(status.state, 'error');
+    assert.equal(counter.calls, 1);
+
+    await assert.rejects(
+      service.ensureModel({ kind: 'city', geonameId: 683844 }),
+      (error: unknown) =>
+        error instanceof CityError &&
+        error.code === 'PROVIDER_FAILED' &&
+        error.retryable === true &&
+        typeof error.retryAfterSec === 'number' &&
+        error.retryAfterSec >= 1
+    );
+    assert.equal(counter.calls, 1, 'the negative cache must short-circuit the second attempt');
+  } finally {
+    await service.shutdown();
+    await removeTempDir(dir);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Degraded models                                                     */
+/* ------------------------------------------------------------------ */
+
+test('a terrain failure marks the generated model degraded', async () => {
+  const raw = await loadRawCityFixture();
+  const chain: ProviderChain = {
+    canGenerate: true,
+    async fetchRaw() {
+      return { ...raw, source: 'overpass' as CitySource };
+    },
+    statuses: () => ({ overpass: 'up' }),
+    shutdown() {
+      /* no-op */
+    }
+  };
+  const terrainFetcher = (async () => {
+    throw new Error('terrain tiles unavailable');
+  }) as unknown as NonNullable<CityServiceOptions['terrainFetcher']>;
+  await withServiceOptions({}, { providerChain: chain, terrainFetcher }, async (service) => {
+    const ensured = await service.ensureModel({ kind: 'city', geonameId: 683844 });
+    assert.equal(ensured.state, 'queued');
+    if (ensured.state !== 'queued') return;
+    const status = await waitForJob(service, ensured.jobId);
+    assert.equal(status.state, 'done', JSON.stringify(status));
+    const ready = await service.readModel(cityKey(683844));
+    assert.ok(ready);
+    assert.equal(ready.meta.degraded, true);
+    assert.ok(ready.meta.degradedReasons?.some((reason) => reason.includes('terrain')));
+    assert.ok(ready.meta.warnings.some((warning) => warning.includes('terrain unavailable')));
+    assert.equal(ready.meta.source, 'overpass');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Cache errors are redacted                                           */
+/* ------------------------------------------------------------------ */
+
+test('cache write errors do not leak absolute host paths into job errors', async () => {
+  const dir = await makeTempDir('sunlight-service-');
+  const service = createCityService(makeTestConfig(dir));
+  const modelsDir = path.join(dir, 'cache', 'models');
+  try {
+    await service.init();
+    await chmod(modelsDir, 0o555);
+    const ensured = await service.ensureModel({ kind: 'city', geonameId: 683844 });
+    assert.equal(ensured.state, 'queued');
+    if (ensured.state !== 'queued') return;
+    const status = await waitForJob(service, ensured.jobId);
+    assert.equal(status.state, 'error');
+    assert.equal(status.error?.code, 'CACHE_FAILED');
+    assert.ok(status.error?.message, 'error message must be present');
+    assert.equal(status.error?.message.includes(dir), false, 'absolute cache path leaked');
+    assert.equal(status.error?.message.includes('/'), false, `unexpected path in ${status.error?.message}`);
+  } finally {
+    await chmod(modelsDir, 0o755).catch(() => undefined);
+    await service.shutdown();
+    await removeTempDir(dir);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Per-client generation cap                                           */
+/* ------------------------------------------------------------------ */
+
+test('per-client generation cap rejects the third concurrent job for one client', async () => {
+  await withServiceOptions({}, { providerChain: delayedFixtureChain(120) }, async (service) => {
+    const first = await service.ensureModel(
+      { kind: 'city', geonameId: 683844 },
+      { clientId: 'client-a' }
+    );
+    assert.equal(first.state, 'queued');
+    const second = await service.ensureModel(
+      { kind: 'point', lat: 45.66, lon: 25.62 },
+      { clientId: 'client-a' }
+    );
+    assert.equal(second.state, 'queued');
+    await assert.rejects(
+      service.ensureModel({ kind: 'point', lat: 45.67, lon: 25.63 }, { clientId: 'client-a' }),
+      (error: unknown) =>
+        error instanceof CityError && error.code === 'CLIENT_JOB_LIMIT' && error.status === 503 && error.retryable
+    );
+    // A different client is not affected.
+    const other = await service.ensureModel(
+      { kind: 'point', lat: 45.68, lon: 25.64 },
+      { clientId: 'client-b' }
+    );
+    assert.equal(other.state, 'queued');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Cache disabled (CACHE_MAX_MB=0)                                     */
+/* ------------------------------------------------------------------ */
+
+test('a disabled cache still serves generated models from memory but persists nothing', async () => {
+  const dir = await makeTempDir('sunlight-service-');
+  const config = makeTestConfig(dir, { cacheMaxBytes: 0 });
+  try {
+    const first = createCityService(config);
+    await first.init();
+    const ensured = await first.ensureModel({ kind: 'city', geonameId: 683844 });
+    assert.equal(ensured.state, 'queued');
+    if (ensured.state === 'queued') {
+      const status = await waitForJob(first, ensured.jobId);
+      assert.equal(status.state, 'done', JSON.stringify(status));
+    }
+    assert.ok(await first.readModel(cityKey(683844)), 'recent model is served from memory');
+    assert.equal(first.health().cache.models, 0);
+    assert.equal(first.health().cache.maxBytes, 0);
+    await first.shutdown();
+
+    // Nothing was persisted, so a fresh instance has no model.
+    const second = createCityService(config);
+    await second.init();
+    try {
+      assert.equal(await second.readModel(cityKey(683844)), null);
+    } finally {
+      await second.shutdown();
+    }
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Resource caps                                                       */
+/* ------------------------------------------------------------------ */
+
+test('pathologically dense targets fail with 422 instead of building', async () => {
+  const raw = await loadRawCityFixture();
+  const chain: ProviderChain = {
+    canGenerate: true,
+    async fetchRaw() {
+      return raw;
+    },
+    statuses: () => ({ fixture: 'up' }),
+    shutdown() {
+      /* no-op */
+    }
+  };
+  await withServiceOptions({}, { providerChain: chain, maxRawElements: 5 }, async (service) => {
+    const ensured = await service.ensureModel({ kind: 'city', geonameId: 683844 });
+    assert.equal(ensured.state, 'queued');
+    if (ensured.state !== 'queued') return;
+    const status = await waitForJob(service, ensured.jobId);
+    assert.equal(status.state, 'error');
+    assert.equal(status.error?.code, 'TARGET_TOO_DENSE');
+    assert.equal(status.error?.retryable, false);
+    assert.equal(await service.readModel(cityKey(683844)), null);
   });
 });

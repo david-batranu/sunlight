@@ -14,6 +14,7 @@ import { bboxesForRadius } from '../geometry.ts';
 import { parseOverpassJson } from '../osm/json.ts';
 import type { RawOsmData } from '../raw.ts';
 import { hostOf, isRetryableStatus, requestText, abortableSleep, backoffMs, type FetchLike } from './http.ts';
+import { sharedTokenBucket, type TokenBucket } from './bucket.ts';
 import type { CityDataProvider, ProviderFetchRequest, ProviderStatus } from './types.ts';
 
 const DEFAULT_TIMEOUT_MS = 45_000;
@@ -29,6 +30,9 @@ export interface OverpassProviderOptions {
   failuresBeforeDown?: number;
   downCooldownMs?: number;
   retryBackoffMs?: number;
+  /** Process-wide upstream budget (default 1 request/second, burst 1). */
+  ratePerSec?: number;
+  bucket?: TokenBucket;
   fetchImpl?: FetchLike;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -50,6 +54,16 @@ export function createOverpassProvider(options: OverpassProviderOptions): CityDa
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? ((ms: number) => abortableSleep(ms));
+  // Public Overpass instances are donated infrastructure: keep a process-wide
+  // budget across all concurrent generation jobs.
+  const bucket =
+    options.bucket ??
+    sharedTokenBucket(
+      'overpass',
+      options.ratePerSec ?? 1,
+      1,
+      options.sleep ? (ms) => options.sleep!(ms) : undefined
+    );
   const state: EndpointState[] = endpoints.map(() => ({ failures: 0, downUntil: 0, lastError: null }));
   let lastOutcome: ProviderStatus = 'unknown';
   let cursor = 0;
@@ -98,6 +112,7 @@ export function createOverpassProvider(options: OverpassProviderOptions): CityDa
 
         request.onProgress?.(Math.min(40, 8 + attempt * 6), 'Fetching OpenStreetMap data', `Overpass · ${hostOf(endpoint)}`);
         try {
+          await bucket.acquire(request.signal);
           const response = await requestText({
             url: endpoint,
             method: 'POST',
@@ -125,7 +140,10 @@ export function createOverpassProvider(options: OverpassProviderOptions): CityDa
             markFailure(index, `${response.status}`);
             attemptErrors.push({ endpoint: hostOf(endpoint), error: `HTTP ${response.status}` });
             if (!retryable) break;
-            await sleep(backoffMs(attempt, retryBackoffMs));
+            // Never sleep after the final attempt: the loop is about to fail.
+            if (attempt + 1 < maxAttempts) {
+              await sleep(response.retryAfterMs ?? backoffMs(attempt, retryBackoffMs));
+            }
             continue;
           }
 

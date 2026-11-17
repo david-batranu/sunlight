@@ -8,15 +8,15 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 
 - **Any city** — search a bundled index of ~65,000 populated places, or let the browser locate the nearest one. A custom “my exact location” point is supported too.
 - **Explore wider** — each city model covers a 3 km × 3 km core by default. The **Area** picker opens a **5 km-radius overview** so you can see the surrounding region, drag a high-detail window and load/recenter the diorama at any chosen point. Switching cities always starts at that city’s current local date and time.
-- **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **NW-up** and you can zoom from the whole city down to a few blocks (**0.45×–32×**).
-- **Focus without reloading** — the **Area** picker shows a 5 km-radius overview with surrounding OSM map context, plus a draggable high-quality window from **100 m to 1500 m radius**. Inside the loaded city, moving or resizing it is instant and makes no OSM data requests; **Focus** fits the camera with context around the window. **Load area** builds a fresh high-detail model where you point, combining area selection and detail in one tool.
+- **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height, or browse the filterable **Named places** list. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **NW-up** and you can zoom from the whole city down to a few blocks (**0.45×–32×**).
+- **Focus without reloading** — the **Area** picker shows a 5 km-radius overview with surrounding OSM map context (zoomable to a 625 m radius), plus a draggable high-quality window from **100 m to 1500 m radius**. Inside the loaded city, moving or resizing it is instant and makes no OSM data requests; **Focus** fits the camera with context around the window. **Load area** builds a fresh high-detail model where you point, combining area selection and detail in one tool. Named places are also readable as a filterable list in the light panel for keyboard/screen-reader users.
 - **Real geometry & elevation** — the server fetches OpenStreetMap building footprints, major/local roads, water, parks, hiking trails and railways, then samples public elevation tiles so hills, river valleys and mountains such as Brașov's Tâmpa shape the diorama instead of rendering as flat parks. The result is a compact low-poly model of a 3 km × 3 km city core with names and landmark metadata baked in. Terrain is baked into the seed models and cached with live models; if an elevation source is unreachable the model gracefully falls back to flat ground.
 - **Real light** — solar and lunar altitude/azimuth computed with `astronomy-engine`; real-time sun and moon shadows on the model, twilight transitions, moon phase brightness and polar day/night handling.
 - **Time travel** — any local date 1900–2100 and minute of day; play/pause at 1×–60× simulated minutes per second, loop a day, or jump to sunrise/sunset/golden hour.
-- **Cached once, served forever** — the first visit to a city generates it on the server; the gzipped model is persisted to a disk cache (Docker volume) and served immutably afterwards.
+- **Cached once, served fast** — the first visit to a city generates it on the server; the gzipped model is persisted to a disk cache (Docker volume) and served with strong ETags. Degraded models (missing terrain/partial coverage) are marked and use a short cache so a transient provider failure cannot pin a bad model for a year.
 - **Seeded for a fast first run** — eight Romanian cities ship pre-baked: Brașov (default), București, Cluj-Napoca, Timișoara, Iași, Constanța, Sibiu and Oradea.
 - **Warm collector’s-diorama design** — crafted plinth, cream placards, terracotta/gold accents, and a sky backdrop that shifts from daylight to golden hour to moonlit night.
-- **Works offline for seeded cities** — no API key, no external database. The optional 5 km area-map tiles fall back to the loaded model when offline.
+- **Works offline for seeded cities** — no API key and no external database. The optional 5 km area-map tiles and their attribution are the only third-party browser request; when they fail, the picker falls back to the loaded model and says so.
 
 ## Screenshots
 
@@ -128,7 +128,11 @@ networks:
 The container port can stay loopback-only (`127.0.0.1:8090:8090`); Caddy reaches
 the app over the shared `sunlight` network as `sunlight:8090`. Set
 `VITE_BASE` in the deployment `.env` so later `docker compose build` runs keep
-the prefix. When running locally, omit it and the SPA stays at `/`.
+the prefix. Behind the proxy, also set `TRUST_PROXY=1` so per-client rate
+limits use the validated `X-Forwarded-For` address instead of Caddy’s container
+IP. A versioned example lives in [`deploy/Caddyfile`](deploy/Caddyfile); HSTS
+and the app security headers are emitted by the application. When running
+locally, omit `VITE_BASE` and `TRUST_PROXY`.
 
 ## How it works
 
@@ -155,13 +159,13 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design and [
 
 ## Data sources and attribution
 
-- **City geometry, roads, water, parks**: © OpenStreetMap contributors, available under the [Open Database License (ODbL 1.0)](https://www.openstreetmap.org/copyright). Geometry is fetched from Overpass or the official OSM API and cached locally. The app displays attribution in the About dialog and footer.
+- **City geometry, roads, water, parks**: © OpenStreetMap contributors, available under the [Open Database License (ODbL 1.0)](https://www.openstreetmap.org/copyright). Geometry is fetched from Overpass or the official OSM API and cached locally. OSM attribution is visible in the time console and Area picker, with full licensing in the About dialog.
 - **City search index**: [GeoNames](https://www.geonames.org/) `cities5000`, licensed CC BY 4.0.
 - **Elevation**: [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (Terrarium PNGs, derived from Mapzen terrain tiles and public DEMs such as SRTM).
 - **Sun/moon positions**: [`astronomy-engine`](https://github.com/cosinekitty/astronomy) (MIT).
 - **3D rendering**: [Three.js](https://threejs.org/) (MIT).
 
-No API keys are required. For a high-traffic public deployment, OSM’s public infrastructure is not an appropriate data source — add a commercial provider behind the existing provider interface (Mapbox/Overture) and keep the cache. Low-volume, cache-first personal or team use is the intended mode.
+No API keys are required. The Area picker fetches a handful of raster tiles directly from OpenStreetMap when opened; all other OSM reads happen server-side. For a high-traffic public deployment, OSM’s public infrastructure is not an appropriate data source — add a commercial provider behind the existing provider interface (Mapbox/Overture) and keep the cache. Low-volume, cache-first personal or team use is the intended mode.
 
 ## Configuration
 
@@ -171,16 +175,25 @@ Copy `.env.example` to `.env` or pass environment variables. Everything is optio
 |---|---|---|
 | `PORT` | `8090` | HTTP port |
 | `HOST` | `127.0.0.1` (compose: `0.0.0.0`) | Listen address |
-| `CACHE_DIR` | `.cache/sunlight` | Model/raw-tile cache directory |
-| `CACHE_MAX_MB` | `1024` | LRU cache size limit |
+| `CACHE_DIR` | `.cache/sunlight` | Model cache directory |
+| `CACHE_MAX_MB` | `1024` | LRU cache size limit; `0` disables disk caching, negative values are rejected |
 | `CITY_RADIUS_M` | `1500` | Half-size of the generated city core (600–1500) |
 | `GENERATION_CONCURRENCY` | `1` | Parallel generation workers |
 | `CITY_SOURCE` | `auto` | `auto`, `overpass`, `osm-api`, `fixture`, or `seed` |
 | `SEEDS_ONLY` | `0` | Refuse network generation; serve seeds/cache only |
-| `DEFAULT_CITY` | `gn-683844` | Default GeoNames city id (Brașov) |
 | `OSM_USER_AGENT` | dev UA | **Set a real contact URL before deploying** |
 | `OVERPASS_ENDPOINTS` | overpass-api.de | Comma-separated Overpass endpoints |
-| `RATE_LIMIT_PER_MIN` | `30` | Per-IP model-generation requests; `0` disables |
+| `RATE_LIMIT_PER_MIN` | `30` | Per-client generation requests; `0` disables |
+| `READ_RATE_LIMIT_PER_MIN` | `120` | Per-client `/api/cities*` requests |
+| `SKY_RATE_LIMIT_PER_MIN` | `60` | Per-client `/api/sky` requests |
+| `JOB_QUEUE_MAX` | `8` | Max waiting generation jobs before `503` |
+| `JOB_PER_CLIENT_MAX` | `2` | Max active+queued jobs per client; `0` disables |
+| `QUEUE_MAX_AGE_SEC` | `600` | Max time a queued job may wait |
+| `FAILURE_COOLDOWN_SEC` | `60` | Negative-cache window for failed model keys |
+| `TRUST_PROXY` | `0` | Trust validated `X-Forwarded-For` (enable behind Caddy/nginx) |
+| `TRUSTED_PROXY_CIDRS` | empty | Optional proxy CIDR allow-list |
+| `GIT_SHA` / `IMAGE_TAG` | empty | Release identity exposed by `/api/health` |
+| `SUNLIGHT_LOG_LEVEL` | `warn` | `debug`, `info`, `warn`, `error` or `silent` |
 
 ## Scripts
 
@@ -197,14 +210,18 @@ Copy `.env.example` to `.env` or pass environment variables. Everything is optio
 | `npm run bake:seeds` | Regenerate the eight pre-baked Romanian city models (network) |
 | `npm run cache:clear` | Delete the local model cache |
 
+## Health and release identity
+
+`/api/health` returns `ok`, `ready`, `degraded`, `status`, checks, queue/cache/worker state and build identity (`version`, commit SHA and image tag when `GIT_SHA`/`IMAGE_TAG` are supplied by the build). `/api/ready` returns `503` only when the core service is unready; `/api/health` stays `200` while degraded so orchestration does not restart a serving deployment. Request logging is enabled at `SUNLIGHT_LOG_LEVEL=info`.
+
 ## Caching
 
 - Models are cached under `CACHE_DIR/models/<key>.json.gz` with a sidecar metadata file; writes are atomic.
 - Responses carry strong ETags and are immutable per model version; repeat visits are served from disk and revalidate with `304`.
-- Provider responses are not persisted between attempts in v1; a failed generation is retried from scratch or falls back to a bundled seed where available.
+- Provider responses are not persisted between attempts; a failed generation is retried from scratch or falls back to a bundled seed where available. Models marked `degraded` use a short cache policy and are regenerated on the next request/bake.
 - The cache key includes the model version and radius. Bump `MODEL_VERSION` in `shared/constants.ts` and run `npm run cache:clear` when changing the model format.
 - Seeds live in `server/data/seeds/` with a SHA-256 manifest and are read-only at runtime.
-- In Docker, the `sunlight-cache` volume survives container restarts and rebuilds.
+- In Docker, the `sunlight-cache` volume survives container restarts and rebuilds. The container itself is read-only with a tmpfs for `/tmp`.
 
 ## Tests
 
@@ -214,7 +231,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (24/24 E2E checks green; unit + integration suite 317 tests).
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 403 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
 
 ## Project layout
 

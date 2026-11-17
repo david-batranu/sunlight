@@ -1,11 +1,11 @@
 /**
  * Merged, vertex-coloured geometry for the diorama.
  *
- * One buffer per feature class keeps the scene at ~5 draw calls for a normal
- * city (plinth, buildings, roads/rail, areas, trees) regardless of how many
- * footprints the model contains. Buildings are extruded prisms with earcut
- * roofs/caps, optional gable roofs, and flat-shaded per-face normals computed
- * by Three.js from the non-indexed buffers.
+ * One buffer per feature class keeps the scene at ~6 draw calls for a normal
+ * city (plinth, terrain, buildings, roads/rail, areas, trees) regardless of how
+ * many footprints the model contains. Buildings are extruded prisms with
+ * earcut roofs/caps, optional gable roofs, and flat-shaded faces (the material
+ * uses derivative normals, so no normal attribute is uploaded).
  *
  * This module is pure (no Three.js, no DOM) so unit tests can build geometry
  * straight from the dev fixtures.
@@ -33,7 +33,7 @@ const EPSILON = 1e-6;
 export const ROAD_LIFT_M = 0.42;
 export const TERRAIN_LIFT_M = 0.05;
 /** Client-side subdivision of each wire heightfield cell (visual smoothing). */
-export const TERRAIN_MESH_SUBDIVISIONS = 4;
+export const TERRAIN_MESH_SUBDIVISIONS = 2;
 export const AREA_LIFT_M: Readonly<Record<number, number>> = {
   1: 0.16, // water
   2: 0.26, // park

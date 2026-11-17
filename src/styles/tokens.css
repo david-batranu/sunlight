@@ -72,6 +72,8 @@
   --z-topbar: 20;
   --z-panel: 20;
   --z-notices: 40;
+  --z-area-backdrop: 44;
+  --z-area: 45;
   --z-overlay: 60;
   --z-modal: 70;
   --z-boot: 100;

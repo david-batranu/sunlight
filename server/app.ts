@@ -11,6 +11,7 @@ import { createApiHandler } from './api/routes.ts';
 import { SkyDayCache } from './api/sky-cache.ts';
 import { applySecurityHeaders, sendText } from './http/respond.ts';
 import { serveStatic } from './http/static.ts';
+import { HttpMetrics } from './http/metrics.ts';
 
 export interface SunlightApp {
   config: AppConfig;
@@ -20,20 +21,39 @@ export interface SunlightApp {
   close(): Promise<void>;
 }
 
-export async function createSunlightApp(config: AppConfig): Promise<SunlightApp> {
-  const cityService = createCityService(config);
+export interface CreateAppOptions {
+  /** Pre-built city service (tests inject one with fake providers/terrain). */
+  cityService?: CityService;
+}
+
+export async function createSunlightApp(config: AppConfig, options: CreateAppOptions = {}): Promise<SunlightApp> {
+  const cityService = options.cityService ?? createCityService(config);
   await cityService.init();
   const skyCache = new SkyDayCache();
-  const apiHandler = createApiHandler({ config, cityService, skyCache });
+  const httpMetrics = new HttpMetrics();
+  const apiHandler = createApiHandler({ config, cityService, skyCache, httpMetrics });
 
   const server = createServer(async (req, res) => {
+    const startedAt = performance.now();
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     applySecurityHeaders(res);
+    const requestPath = url.pathname;
+    res.on('finish', () => {
+      const duration = performance.now() - startedAt;
+      httpMetrics.record(res.statusCode, duration);
+      const level = (process.env.SUNLIGHT_LOG_LEVEL || 'warn').toLowerCase();
+      if (level === 'info' || level === 'debug') {
+        console.info(
+          `[http] ${req.method || 'GET'} ${requestPath} ${res.statusCode} ${duration.toFixed(1)}ms`
+        );
+      }
+    });
 
     try {
       if (url.pathname.startsWith('/api/')) {
         const handled = await apiHandler(req, res, url);
         if (!handled) {
+          res.setHeader('Allow', 'GET, HEAD, POST, DELETE');
           sendText(res, 405, 'Method not allowed.');
         }
         return;
@@ -93,9 +113,11 @@ export interface RunningApp extends SunlightApp {
 /** Starts the app on a port (0 picks a free one) — used by tests and index.ts. */
 export async function startSunlightApp(
   config: AppConfig,
-  options: { port?: number; host?: string } = {}
+  options: { port?: number; host?: string; cityService?: CityService } = {}
 ): Promise<RunningApp> {
-  const app = await createSunlightApp(config);
+  const app = await createSunlightApp(config, {
+    ...(options.cityService ? { cityService: options.cityService } : {})
+  });
   const port = options.port ?? config.port;
   const host = options.host ?? config.host;
   await new Promise<void>((resolve, reject) => {

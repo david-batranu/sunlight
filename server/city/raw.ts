@@ -55,6 +55,11 @@ export interface RawOsmData {
   relations: RawRelation[];
   /** Non-fatal issues surfaced by the provider/parser (deduped, bounded). */
   warnings: string[];
+  /**
+   * True when the provider knowingly returned incomplete coverage (e.g. a tile
+   * budget was exhausted). The service marks such models as degraded.
+   */
+  partial?: boolean;
 }
 
 export function emptyRawOsmData(source: CitySource, warnings: string[] = []): RawOsmData {

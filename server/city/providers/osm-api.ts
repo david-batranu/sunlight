@@ -14,6 +14,7 @@ import { parseOsmXml } from '../osm/xml.ts';
 import type { RawOsmData } from '../raw.ts';
 import { dedupeWarnings, mergeRawOsmData } from '../raw.ts';
 import { hostOf, isRetryableStatus, requestText, abortableSleep, backoffMs, type FetchLike } from './http.ts';
+import { sharedTokenBucket, type TokenBucket } from './bucket.ts';
 import type { CityDataProvider, ProviderFetchRequest, ProviderStatus } from './types.ts';
 
 const DEFAULT_BASE_URL = 'https://api.openstreetmap.org/api/0.6/map';
@@ -35,6 +36,9 @@ export interface OsmApiProviderOptions {
   maxDepth?: number;
   minTileSizeDeg?: number;
   maxBodyBytes?: number;
+  /** Process-wide upstream budget (default 2 requests/second, burst 2). */
+  ratePerSec?: number;
+  bucket?: TokenBucket;
   fetchImpl?: FetchLike;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
@@ -54,6 +58,16 @@ export function createOsmApiProvider(options: OsmApiProviderOptions): CityDataPr
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? ((ms: number) => abortableSleep(ms));
+  // The official OSM API is shared infrastructure: cap total tile throughput
+  // process-wide on top of the per-tile spacing.
+  const bucket =
+    options.bucket ??
+    sharedTokenBucket(
+      'osm-api',
+      options.ratePerSec ?? 2,
+      2,
+      options.sleep ? (ms) => options.sleep!(ms) : undefined
+    );
   let lastOutcome: ProviderStatus = 'unknown';
 
   return {
@@ -77,6 +91,7 @@ export function createOsmApiProvider(options: OsmApiProviderOptions): CityDataPr
           const wait = spacingMs - (now() - lastRequestAt);
           if (wait > 0) await sleep(wait);
         }
+        await bucket.acquire(request.signal);
         lastRequestAt = now();
         requests += 1;
         const url = `${baseUrl}?bbox=${formatDeg(box.west)},${formatDeg(box.south)},${formatDeg(box.east)},${formatDeg(box.north)}`;
@@ -108,7 +123,7 @@ export function createOsmApiProvider(options: OsmApiProviderOptions): CityDataPr
                   502,
                   true
                 );
-                await sleep(backoffMs(attempt));
+                await sleep(response.retryAfterMs ?? backoffMs(attempt));
                 continue;
               }
               throw new CityError(
@@ -187,6 +202,9 @@ export function createOsmApiProvider(options: OsmApiProviderOptions): CityDataPr
       request.onProgress?.(58, 'Merging OSM API tiles', `${completed} tile(s)`);
       const merged = mergeRawOsmData(parts, 'osm-api');
       merged.warnings = dedupeWarnings([...warnings, ...merged.warnings], 24);
+      // Coverage is incomplete when the tile budget or splittable-depth limit
+      // stopped us; the service marks the resulting model as degraded.
+      if (skipped > 0) merged.partial = true;
       return merged;
     }
   };

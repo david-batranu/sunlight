@@ -1,90 +1,72 @@
-# Sunlight — browser, visual, accessibility and performance QA
+# Sunlight QA report
 
-Date: 2026-11-17 · Verifier: qa-verifier (independent), extended by the lead after the v4 detail-window pass.
-Scope: real headless-Chrome E2E, visual QA, accessibility basics, performance smoke.
-
-## Environment
-
-- macOS (arm64, Apple M4 Pro), Node v26.13.1, dependencies installed.
-- Google Chrome 157.0.8103.52, headless, WebGL2 via SwiftShader:
-  `--enable-unsafe-swiftshader --use-angle=swiftshader`.
-- Build under test: production `dist/` + `dist-server/`, served by the E2E runner on a random free port with `CITY_SOURCE=seed SEEDS_ONLY=1` and an isolated temp cache. External network is blocked in every browser context.
-- Seeds: 8 baked Romanian models at model v4 / 1500 m radius, each with a 49 × 49 terrain heightfield from AWS Terrain Tiles. Brașov default: `gn-683844-r1500-v4`, 8,465 buildings, 1,300 roads (41 hiking trails), 289 areas, 113.5 m of terrain relief (Tâmpa slopes). Flat pedestrian footpaths are filtered out; steep natural trails survive as class 5.
+**Date:** 2026-11-17 · **Version:** 0.2.0
+**Environment:** macOS arm64 (Apple M4 Pro), Node v26.13.1, Chrome headless + SwiftShader for E2E.
+**Result:** GREEN — **403/403** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
 
 ## Commands
 
-```bash
-npm test                          # unit + integration, offline fixtures: 317/317
-npm run test:e2e                  # build + seed-only server + Chrome: 24/24
-E2E_SKIP_BUILD=1 npm run test:e2e # reuse current build (~53 s)
-```
+| Command | Result |
+|---|---|
+| `npm run typecheck` | pass (web + server + tests) |
+| `npm test` | **403/403** pass, offline fixtures, ~12 s |
+| `npm run build` | pass; SPA JS ~687 kB raw / ~184 kB gzip, CSS ~53 kB / ~11 kB gzip |
+| `npm run test:e2e` | **29/29** pass, ~76 s, seed-only server, isolated cache, external browser traffic blocked |
+| `docker compose config` | pass (compose v2; read-only container, cache volume, hardened options) |
 
-Tests: `tests/e2e/app.test.mjs` (functional), `tests/e2e/visual.test.mjs` (screenshots, visual, perf, a11y), helpers in `tests/e2e/helpers.mjs`; node:test + playwright-core.
+## What this QA pass covers
 
-## Result: GREEN — 24/24 E2E checks pass, 0 fail; 317/317 unit + integration tests pass
+### Security / operations
+- Proxy-aware rate limits (`TRUST_PROXY`, validated `X-Forwarded-For`, IPv6 `/64` buckets); generation/read/sky limits; 429 + `Retry-After`.
+- Generation rate limit counted after validation; health/readiness exempt.
+- Worker boot-crash fallback, truthful `/api/health` (`ok/ready/degraded/status/checks/build/worker/http`) and `/api/ready` (200/503).
+- Degraded models (terrain/partial coverage) use short cache, are flagged in metadata and are re-baked by the seed quality gate.
+- Cache version/radius pruning, positive `CACHE_MAX_MB=0` semantics, seed-manifest/constants guard.
+- Queue-depth, per-client, queued-age and negative-cache limits; process-wide upstream token buckets; Retry-After handling.
+- HEAD model requests, bad-model-key 400, single-gzip responses, error redaction, HSTS and hardened container settings.
+- CI now runs typecheck + unit/integration + browser E2E before any image publish.
 
-| # | Check | Result |
-|---|-------|--------|
-| 1 | Seeded first run: ready phase, Brașov chip, model key, non-blank WebGL canvas, merged draw calls | PASS |
-| 2 | Deep link `2026-06-21 13:20` → sun altitude 67.8°, azimuth 180° S, sun light, shadows on | PASS |
-| 3 | Slider 20:45 → golden mood, sun 3.1° WNW, long-shadow state | PASS |
-| 4 | Slider 23:30 → night, sun −16°, moon light | PASS |
-| 5 | Date input 2026-12-21 → different sunrise/sunset and max altitude | PASS |
-| 6 | URL reload restores city, date and minute | PASS |
-| 7 | Search → Cluj-Napoca switches chip/model/URL | PASS |
-| 8 | Geolocation stub + Locate → nearest city Brașov | PASS |
-| 9 | Pan/zoom/reset; light direction unchanged by camera | PASS |
-| 10 | Play/pause advances and holds simulated time | PASS |
-| 11 | Escape closes search and About dialogs | PASS |
-| 12 | Mobile 390×844: controls visible/in-viewport, no horizontal overflow, touch targets | PASS |
-| 13 | **Wide terrain model**: 1500 m radius → 5,000+ buildings, named landmarks/roads, 49×49 heightfield with 113.5 m relief; NW-up default (compass NW toward the top), compass rotates with camera and resets the view; 32× zoom available; 41 hiking trails retained | PASS |
-| 14 | **Feature tooltips**: hover shows the named feature under the pointer, click pins it with a close button, Escape dismisses | PASS |
-| 15 | **Area picker**: one top-bar button opens the 5 km overview, pressed state, detail canvas and Load area visible; Escape closes; old click-to-recenter mode is gone | PASS |
-| 15b | **Detail window**: opens at the wide context view, 300 m resize does not move the camera, Focus zooms to the window, dragging moves it, Escape closes, no model reload | PASS |
-| 16 | **City switch → new city's local now**: historical deep link then switch to Cluj → local today and current minute | PASS |
-| 17–19 | Canonical screenshots, mobile screenshot, brightness ordering | PASS |
-| 20 | Performance smoke (9 draw calls, 574k scene triangles incl. shadow pass, terrain included) | PASS |
-| 21 | A11y roles/names, slider `aria-valuetext`, date label, compass name, focus-visible | PASS |
-| 22 | Dialog focus trap and Escape restore | PASS |
-| 23 | Reduced-motion preference suppresses transitions | PASS |
+### Rendering / performance
+- On-demand render scheduler: paused/settled scene renders **0 frames/s** and does not rebuild shadows.
+- Explicit PCF shadow map; shadows invalidated by lighting/model/quality only.
+- Adaptive low quality on coarse-pointer/small screens; DPR 1.25, 1024 shadows, no trees.
+- Terrain subdivision reduced, unused vertex normals removed, vertex colours packed to Uint8: ~45% less VBO/upload volume.
+- Debug exposes `framesRendered`, median/p95 frame interval, rendered frames/s, quality and DPR.
 
-No page errors or console errors in any of the 23 browser runs.
+Measured E2E (1440×900, SwiftShader): last frame **9 draw calls / 439,467 triangles** including the shadow pass; settled wide view **6 draws / ~245,145 triangles**; idle render **0/s**. Hardware GPU steady state remains 60 fps vsync; true SwiftShader steady cadence is ~5.7 fps (the transient `fps` EMA is replaced by rolling median/p95).
 
-## Screenshots (`qa/shots/`)
+### Usability / accessibility
+- Area picker now becomes a modal sheet at ≤1180 px wide or ≤620 px tall, so the time console cannot cover it; map is 1:1 and unclipped at 320–430 px widths and 200% zoom.
+- Map zoom down to 625 m radius; 100 m window becomes ~25 CSS px at max zoom; footprint and numeric centre shown; Alt+arrow fine steps (1% radius).
+- Focus always zooms in or stays at the model-fit view; opening/closing the picker no longer resets the camera.
+- Space activates focused controls (global playback shortcut is suppressed); Enter works; Escape closes the Area panel even from inputs and restores focus to Area.
+- Progress/error overlays focus and trap correctly, background is inert; mobile light sheet is a proper dialog.
+- Keyboard diorama navigation: focus `#scene`, arrows pan (Shift larger), `+`/`-` zoom.
+- Filterable **Named places** list in the light panel is an accessible alternative to pointer-only tooltips; pinned tooltips no longer auto-hide.
+- Primary action contrast ≥4.5:1; micro-labels raised to 11 px where feasible; 44 px coarse-pointer targets.
+- Persistent OSM attribution in the time console/Area picker; About privacy copy explicitly discloses OSM tile requests and coordinate deep links.
+- Notices auto-dismiss with hover/focus pause; raw error codes are behind “Technical details”.
 
-| File | State |
-|------|-------|
-| `brasov-noon.png` | 2026-06-21 13:20, sun 67.8° S; wide NW-up diorama, terrain (Tâmpa in the foreground), compass, Area picker |
-| `brasov-golden.png` | 20:45, sun 3.1° WNW, long shadows across the terrain |
-| `brasov-night.png` | 23:30, sun −16°, moonlight |
-| `brasov-mobile.png` | 390×844 @2×, noon, compact compass + 218 px bottom sheet |
-| `brasov-morning.png` | 07:30, sun 18.4° ENE — opposite shadow direction evidence (re-run if present) |
-| `feature-tooltip.png` | pinned tooltip for “Strada Poarta Șchei · Primary street” |
-| `detail-area.png` | 5 km area overview at 300 m radius; surrounding OSM context, loaded-city footprint and the selected high-detail square |
+### Recent E2E checks added
+- Seeded first run / canvas readback with the on-demand renderer.
+- Deep link date/sun position; date/time controls; city search, geolocation and city switching.
+- Camera pan/orbit/zoom/reset; compass; tooltips; playback.
+- Area picker open, default Focus zoom-in, resize-without-camera, drag without reload, Escape/close/focus return.
+- 200%-zoom and 375×667 Area sheet/map layout; Space-on-controls; Today-preserves-time vs Now; overview map zoom; keyboard pan/zoom; Named places list; mobile layout and reduced motion.
 
+## Screenshots
 
-Visual review: composition and warm placard design remain coherent; panels do not clip at 1440×900; compass sits clear of the top bar/light panel/time console; tooltip is legible and flips/clamps at the viewport edge; no shadow acne, peter-panning or missing contact; noon shadows short/north, golden-hour shadows long/east, morning shadows opposite. Night is legible but intentionally dark.
+`qa/shots/` is regenerated by `npm run test:e2e`:
 
-## Performance smoke
+- `brasov-noon.png`, `brasov-golden.png`, `brasov-night.png`, `brasov-mobile.png`
+- `detail-area.png` (offline E2E fallback; production also loads OSM context tiles)
+- `feature-tooltip.png`
 
-- 1440×900, production build, SwiftShader: **9 draw calls, 550,059 scene triangles (including the shadow pass), ~23 fps**
-  (SwiftShader is software rasterisation; FPS is not representative of a hardware GPU).
-- Model: 343.3 KiB gzip for Brașov at 1500 m / 8,465 buildings including the 49 × 49 heightfield; flat footpaths removed; sky payload ~4.3 KB gzip.
-- Live generation verified separately: Sinaia v3 generated through the worker with a 160 m-clamped terrain relief sample (AWS tiles reachable).
-- No geometry leak across city switches; draw calls stay merged.
+## Known limitations / remaining work
 
-## Defects and gaps
-
-| Sev | Area | Issue |
-|-----|------|-------|
-| Minor | Visual, mobile | Portrait 390×844 fits the full wide base, so the diorama can read small with empty sky; portrait-specific framing is a follow-up. |
-| Minor | Terrain | Terrain is a single 49 × 49 heightfield, 0.3× exaggerated and capped at 160 m; cliffs, bridges and precise summits outside the 3 km square are not modelled. Steep forests are painted into the terrain rather than drape meshes. |
-| Info | Area picker | The 5 km overview is a one-time OSM raster tile layer (browser-cached; © OpenStreetMap contributors) with a loaded-model fallback offline. The 3D diorama remains the loaded 3 km model; Load area builds a new 3 km model at the selected point. Outside the detail square is muted/desaturated at render time rather than a separate geometry LOD, so triangle count and API cost are unchanged while the window moves. |
-| Info | Trails | Flat pedestrian footpaths are filtered out; steep/natural or explicitly tagged hiking trails remain as class 5. |
-| Minor | Perf | FPS must be re-checked on a hardware GPU; the SwiftShader number is a smoke test. |
-| Info | E2E | Choose-area full recentering is verified manually against a fixture-capable server; the automated E2E server is seed-only, so the test covers the UI/mode contract only. |
-| Info | Data | Heights are often inferred; some labels (e.g. cemetery areas) use broad kind names. |
-
-## Recommendation
-
-Accept the v4 pass: real elevation, a NW-up default view, wide 3 km models, landmark/road tooltips, orientation compass, city-local-now switching, hiking-trail preservation, and a combined 5 km area picker with a draggable 100–1500 m detail window (Focus now visibly fits the camera; moving the window within the loaded city costs zero OSM data requests) are all integrated and verified. Remaining work is polish (portrait camera framing, hardware-GPU FPS pass) rather than functional defects.
+- No spatial LOD/frustum chunking yet: a 32× zoom still submits the merged city geometry; a detail-tile/chunked architecture is the next large rendering improvement.
+- Hover picking remains a raycast over the merged meshes (~6 ms on M4 Pro); a footprint grid is planned.
+- Cold load still uploads the full merged geometry; off-main-thread geometry building/transferables are future work.
+- Real VoiceOver/NVDA/TalkBack, Safari/Firefox, physical touch devices and forced-colors/HCM were not tested in this automated pass.
+- The Area picker still fetches a handful of OSM raster tiles directly from the browser (disclosed in About); an operator running at scale should proxy/self-host or use a commercial tile provider.
+- `qa/shots` remains a tracked binary-artefact directory; moving screenshots to CI artefacts is desirable.

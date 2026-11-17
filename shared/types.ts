@@ -36,6 +36,15 @@ export interface ModelMeta {
   warnings: string[];
   attribution: string;
   timingsMs?: Record<string, number>;
+  /**
+   * True when a transient failure (terrain provider, partial upstream
+   * coverage) produced a usable-but-incomplete model. Degraded models are
+   * served with a short/no-store cache profile so they can be refreshed, and
+   * seed baking treats them as stale.
+   */
+  degraded?: boolean;
+  /** Human-readable reasons for `degraded` (bounded, no host paths). */
+  degradedReasons?: string[];
 }
 
 export interface ModelBounds {
@@ -265,15 +274,65 @@ export interface SkyDay {
 /* Health                                                              */
 /* ------------------------------------------------------------------ */
 
-export interface HealthResponse {
-  ok: true;
+export interface HealthCheck {
+  name: string;
+  ok: boolean;
+  detail?: string;
+}
+
+export type HealthStatus = 'ok' | 'degraded' | 'unready';
+
+export interface HealthBuildInfo {
+  /** Application/package version. */
   version: string;
+  /** Commit SHA when the deployment provides GIT_SHA. */
+  sha: string | null;
+  /** Container image tag when the deployment provides IMAGE_TAG. */
+  imageTag: string | null;
+  /** Node.js runtime version. */
+  node: string;
+}
+
+export interface HealthWorkerInfo {
+  /** A worker entry exists and has not been disabled by a boot failure. */
+  enabled: boolean;
+  /** True once the worker failed and generation fell back in-process. */
+  disabled: boolean;
+  /** How many times a worker boot/crash triggered the in-process fallback. */
+  fallbacks: number;
+}
+
+/**
+ * `/api/health` and `/api/ready` payload.
+ *
+ * `ok` is false for both degraded and unready states; `ready` only reflects
+ * whether the service can serve its core contract at all. `/api/ready` returns
+ * 503 when `ready` is false; `/api/health` returns 200 while degraded so a
+ * degraded-but-serving deployment is not restarted by orchestration.
+ */
+export interface HealthResponse {
+  ok: boolean;
+  ready: boolean;
+  degraded: boolean;
+  status: HealthStatus;
+  version: string;
+  build: HealthBuildInfo;
   modelVersion: number;
   uptimeSec: number;
   cache: { models: number; bytes: number; maxBytes: number };
-  queue: { active: number; queued: number };
+  queue: { active: number; queued: number; maxQueued?: number };
   providers: Record<string, 'up' | 'down' | 'unknown'>;
   seeds: { count: number; slugs: string[] };
+  worker: HealthWorkerInfo;
+  checks: HealthCheck[];
+  sky?: { entries: number };
+  /** In-process request counters and a 256-sample p95 latency. */
+  http?: {
+    requests: number;
+    errors: number;
+    rateLimited: number;
+    p95Ms: number;
+  };
 }
 
 /* ------------------------------------------------------------------ */

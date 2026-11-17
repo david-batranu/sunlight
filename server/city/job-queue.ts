@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ApiError, GenerationStep, JobProgress, JobState, JobStatus } from '../../shared/types.ts';
 import { CityError, isAbortError } from './errors.ts';
+import { redactValue, safeErrorMessage } from './redact.ts';
 
 export interface JobContext {
   readonly jobId: string;
@@ -26,9 +27,23 @@ export interface JobQueueOptions {
   ttlMs?: number;
   /** Interval of the TTL sweeper (ms). */
   sweepIntervalMs?: number;
+  /** Maximum queued (not running) jobs; Infinity disables the cap. */
+  maxQueued?: number;
+  /** Maximum active+queued jobs per client id; 0 or Infinity disables the cap. */
+  maxPerClient?: number;
+  /** Maximum time a queued job may wait before failing with QUEUE_TIMEOUT. */
+  maxQueuedAgeMs?: number;
   now?: () => Date;
   onRunnerError?: (error: unknown, jobId: string) => void;
 }
+
+export interface EnqueueOptions {
+  /** Stable client identity for the per-client concurrency cap. */
+  clientId?: string;
+}
+
+/** Retry/backoff hint attached to saturation errors (seconds). */
+export const QUEUE_RETRY_AFTER_SEC = 5;
 
 export interface EnqueueResult {
   jobId: string;
@@ -38,6 +53,7 @@ export interface EnqueueResult {
 interface JobRecord {
   jobId: string;
   key: string;
+  clientId: string | null;
   state: JobState;
   progress: JobProgress;
   startedAt: string;
@@ -61,6 +77,9 @@ export class JobQueue {
   private readonly activeByKey = new Map<string, string>();
   private readonly concurrency: number;
   private readonly ttlMs: number;
+  private readonly maxQueued: number;
+  private readonly maxPerClient: number;
+  private readonly maxQueuedAgeMs: number;
   private readonly now: () => Date;
   private readonly onRunnerError: ((error: unknown, jobId: string) => void) | null;
   private readonly sweeper: NodeJS.Timeout;
@@ -70,6 +89,13 @@ export class JobQueue {
   constructor(options: JobQueueOptions) {
     this.concurrency = Math.max(1, Math.floor(options.concurrency));
     this.ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+    this.maxQueued =
+      options.maxQueued === undefined ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor(options.maxQueued));
+    this.maxPerClient =
+      options.maxPerClient === undefined || options.maxPerClient <= 0
+        ? Number.POSITIVE_INFINITY
+        : Math.floor(options.maxPerClient);
+    this.maxQueuedAgeMs = Math.max(0, options.maxQueuedAgeMs ?? 10 * 60_000);
     this.now = options.now ?? (() => new Date());
     this.onRunnerError = options.onRunnerError ?? null;
     this.sweeper = setInterval(() => this.sweep(), options.sweepIntervalMs ?? 60_000);
@@ -84,18 +110,40 @@ export class JobQueue {
     return this.queue.length;
   }
 
-  enqueue(key: string, runner: JobRunner): EnqueueResult {
+  enqueue(key: string, runner: JobRunner, options: EnqueueOptions = {}): EnqueueResult {
     const existing = this.activeByKey.get(key);
     if (existing) {
       const job = this.jobs.get(existing);
       if (job && !TERMINAL_STATES.has(job.state)) return { jobId: existing, deduped: true };
       this.activeByKey.delete(key);
     }
+    const clientId = options.clientId ?? null;
+    if (this.queue.length >= this.maxQueued) {
+      throw new CityError(
+        'QUEUE_FULL',
+        'The generation queue is full. Try again in a few seconds.',
+        503,
+        true,
+        undefined,
+        QUEUE_RETRY_AFTER_SEC
+      );
+    }
+    if (clientId !== null && this.activeForClient(clientId) >= this.maxPerClient) {
+      throw new CityError(
+        'CLIENT_JOB_LIMIT',
+        'You already have the maximum number of city generations in progress. Wait for one to finish.',
+        503,
+        true,
+        undefined,
+        QUEUE_RETRY_AFTER_SEC
+      );
+    }
     const jobId = randomUUID();
     const timestamp = this.now().toISOString();
     const record: JobRecord = {
       jobId,
       key,
+      clientId,
       state: 'queued',
       progress: { step: 'resolve', percent: 0, label: 'Queued for generation' },
       startedAt: timestamp,
@@ -183,6 +231,15 @@ export class JobQueue {
     }
   }
 
+  /** Number of queued/running jobs attributed to a client. */
+  private activeForClient(clientId: string): number {
+    let count = 0;
+    for (const record of this.jobs.values()) {
+      if (record.clientId === clientId && !TERMINAL_STATES.has(record.state)) count += 1;
+    }
+    return count;
+  }
+
   private pump(): void {
     if (this.shuttingDown) return;
     while (this.running < this.concurrency && this.queue.length > 0) {
@@ -253,13 +310,14 @@ export class JobQueue {
     const apiError: ApiError = isCityErrorLike(error)
       ? {
           code: error.code,
-          message: error.message,
+          // Client-visible failures never leak host filesystem paths.
+          message: safeErrorMessage(error),
           retryable: error.retryable,
-          ...(error.details !== undefined ? { details: error.details } : {})
+          ...(error.details !== undefined ? { details: redactValue(error.details) } : {})
         }
       : {
           code: 'MODEL_FAILED',
-          message: error instanceof Error ? error.message : String(error),
+          message: safeErrorMessage(error),
           retryable: true
         };
     record.error = apiError;
@@ -271,6 +329,30 @@ export class JobQueue {
 
   private sweep(): void {
     const nowMs = Date.now();
+    // A queued job that never starts (upstream outage, huge backlog) must not
+    // leave the client polling forever. Fail it with a retryable queue timeout
+    // and release its dedupe key so a later request can try again.
+    if (this.maxQueuedAgeMs > 0) {
+      for (const record of this.jobs.values()) {
+        if (record.state !== 'queued') continue;
+        const ageMs = nowMs - Date.parse(record.startedAt);
+        if (!Number.isFinite(ageMs) || ageMs <= this.maxQueuedAgeMs) continue;
+        this.finishWithError(
+          record,
+          new CityError(
+            'QUEUE_TIMEOUT',
+            'The generation queue did not reach this job in time. Try again.',
+            503,
+            true,
+            undefined,
+            QUEUE_RETRY_AFTER_SEC
+          )
+        );
+        if (this.activeByKey.get(record.key) === record.jobId) this.activeByKey.delete(record.key);
+        const index = this.queue.indexOf(record.jobId);
+        if (index >= 0) this.queue.splice(index, 1);
+      }
+    }
     const terminal: JobRecord[] = [];
     for (const record of this.jobs.values()) {
       if (!TERMINAL_STATES.has(record.state)) continue;

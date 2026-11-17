@@ -244,3 +244,86 @@ test('shutdown cancels outstanding jobs and resolves', async () => {
   assert.equal(queue.get(queued.jobId)?.state, 'cancelled');
   gate.release();
 });
+
+test('caps the queued backlog with a retryable 503', async () => {
+  const queue = new JobQueue({ concurrency: 1, maxQueued: 1, sweepIntervalMs: 60_000 });
+  try {
+    const gate = controlledGate();
+    const running = queue.enqueue('gn-1-r900-v1', async () => {
+      await gate.promise;
+    });
+    await waitFor(() => queue.active === 1, 500);
+    const queued = queue.enqueue('gn-2-r900-v1', async () => undefined);
+    assert.throws(
+      () => queue.enqueue('gn-3-r900-v1', async () => undefined),
+      (error: unknown) =>
+        error instanceof CityError &&
+        error.code === 'QUEUE_FULL' &&
+        error.status === 503 &&
+        error.retryable === true &&
+        typeof error.retryAfterSec === 'number' &&
+        error.retryAfterSec >= 1
+    );
+    assert.equal(queue.queued, 1);
+    gate.release();
+    await waitFor(() => queue.get(running.jobId)?.state === 'done');
+    await waitFor(() => queue.get(queued.jobId)?.state === 'done');
+    // Capacity frees up once the queue drains.
+    const next = queue.enqueue('gn-3-r900-v1', async () => undefined);
+    await waitFor(() => queue.get(next.jobId)?.state === 'done');
+  } finally {
+    await queue.shutdown();
+  }
+});
+
+test('caps active+queued jobs per client without affecting other clients', async () => {
+  const queue = new JobQueue({ concurrency: 1, maxPerClient: 1, sweepIntervalMs: 60_000 });
+  try {
+    const gate = controlledGate();
+    const first = queue.enqueue(
+      'gn-1-r900-v1',
+      async () => {
+        await gate.promise;
+      },
+      { clientId: 'client-a' }
+    );
+    assert.throws(
+      () =>
+        queue.enqueue('gn-2-r900-v1', async () => undefined, {
+          clientId: 'client-a'
+        }),
+      (error: unknown) => error instanceof CityError && error.code === 'CLIENT_JOB_LIMIT' && error.status === 503
+    );
+    const other = queue.enqueue('gn-3-r900-v1', async () => undefined, { clientId: 'client-b' });
+    assert.notEqual(other.jobId, first.jobId);
+    gate.release();
+    await waitFor(() => queue.get(first.jobId)?.state === 'done');
+    await waitFor(() => queue.get(other.jobId)?.state === 'done');
+  } finally {
+    await queue.shutdown();
+  }
+});
+
+test('job errors redact absolute filesystem paths', async () => {
+  const queue = new JobQueue({ concurrency: 1, sweepIntervalMs: 60_000 });
+  try {
+    const { jobId } = queue.enqueue('gn-1-r900-v1', async () => {
+      throw new CityError(
+        'CACHE_FAILED',
+        "Could not write the model cache: EACCES: permission denied, open '/var/folders/ab/models/gn-1-r900-v1.json.gz'",
+        500,
+        false,
+        { file: '/var/folders/ab/models/gn-1-r900-v1.json.gz' }
+      );
+    });
+    await waitFor(() => queue.get(jobId)?.state === 'error');
+    const status = queue.get(jobId);
+    assert.ok(status?.error);
+    assert.ok(!status.error.message.includes('/var/folders'), 'message must not leak host paths');
+    assert.ok(status.error.message.includes('<path>'));
+    const details = JSON.stringify(status.error.details);
+    assert.ok(!details.includes('/var/folders'), 'details must not leak host paths');
+  } finally {
+    await queue.shutdown();
+  }
+});

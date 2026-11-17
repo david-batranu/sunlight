@@ -148,7 +148,7 @@ export function createFeatureTooltip(ctx: UIContext): FeatureTooltipHandle {
   }
 
   function update(state: AppState): void {
-    const hover = state.pickingArea ? null : state.hover;
+    const hover = state.hover;
     if (!hover) {
       patcher.hidden(element, true);
       lastKey = '';

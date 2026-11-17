@@ -19,7 +19,9 @@ import type {
 import {
   DETAIL_CONTEXT_RADIUS_M,
   DETAIL_DEFAULT_RADIUS_M,
+  MODEL_VERSION,
   SEED_BY_GEONAME_ID,
+  SKY_VERSION,
   DEFAULT_CITY_GEONAME_ID
 } from '../shared/constants.ts';
 import type { AppActions, CurrentLight, DetailWindow, SceneHandle, UIContext } from './app/contracts.ts';
@@ -27,6 +29,7 @@ import { ApiRequestError, createApi } from './app/api.ts';
 import { createInitialState, createStore, type AppState } from './app/state.ts';
 import {
   clampDetailWindow as clampDetailWindowInFrame,
+  detailWindowInsideModel,
   detailWindowToGeo,
   type DetailFrame
 } from './app/detail.ts';
@@ -46,8 +49,6 @@ import { createUI } from './ui/shell.ts';
 const POLL_INTERVAL_MS = 700;
 const SKY_PREFETCH_DELAY_MS = 1200;
 const HOVER_THROTTLE_MS = 70;
-const STICKY_TOOLTIP_MS = 5000;
-const METRES_PER_DEGREE = 111_320;
 
 function currentModelDetailFrame(): DetailFrame | null {
   const model = store.getState().model;
@@ -220,6 +221,14 @@ async function applySky(date: string, token: number): Promise<void> {
   try {
     const sky = await fetchSky(state.city, date);
     if (myToken !== skyToken || token !== loadToken || destroyed) return;
+    if (sky.v !== SKY_VERSION) {
+      throw new ApiRequestError(
+        `Sky data version ${sky.v} does not match this app (${SKY_VERSION}). Refresh the page.`,
+        409,
+        'SKY_VERSION_MISMATCH',
+        false
+      );
+    }
     const minute = store.getState().minute;
     store.setState({
       sky,
@@ -249,6 +258,20 @@ async function applySky(date: string, token: number): Promise<void> {
 
 async function applyModel(model: CityModel, token: number, options: LoadOptions = {}): Promise<void> {
   if (token !== loadToken) return;
+  if (model.v !== MODEL_VERSION) {
+    store.setState({
+      phase: 'error',
+      progress: null,
+      error: {
+        code: 'MODEL_VERSION_MISMATCH',
+        message: `This model is version ${model.v}, but this app expects version ${MODEL_VERSION}. Refresh the page or clear the cache.`,
+        retryable: true,
+        targetName: model.city?.name
+      }
+    });
+    hideBoot();
+    return;
+  }
   rememberModel(model);
   const tz = model.city.tz;
   const state = store.getState();
@@ -292,6 +315,14 @@ async function applyModel(model: CityModel, token: number, options: LoadOptions 
   });
   document.title = `Sunlight — ${model.city.name}`;
   publishUrl(store.getState());
+  if (activeTarget.kind === 'point') {
+    addNotice(`Loaded a high-detail model near ${model.city.name}.`);
+  }
+  if (model.meta.degraded) {
+    addNotice(
+      `This city model is incomplete (${model.meta.degradedReasons?.join('; ') || 'terrain or map coverage degraded'}). It will refresh on the next generation.`
+    );
+  }
   await applySky(date, token);
   if (token === loadToken) {
     store.setState({ phase: 'ready' });
@@ -615,6 +646,21 @@ const actions: AppActions = {
   },
 
   goToday() {
+    const state = store.getState();
+    const city = state.city;
+    if (!city) return;
+    const date = todayInTimezone(city.tz);
+    const minute = state.minute;
+    userTouchedTime = true;
+    explicitDate = date;
+    explicitMinute = Math.floor(minute);
+    store.setState({ date, current: setCurrentFromSky(state.sky, minute) });
+    publishUrl(store.getState());
+    scene.setTime(minute);
+    void applySky(date, loadToken);
+  },
+
+  setNow() {
     const city = store.getState().city;
     if (!city) return;
     const date = todayInTimezone(city.tz);
@@ -626,10 +672,6 @@ const actions: AppActions = {
     publishUrl(store.getState());
     scene.setTime(minute);
     void applySky(date, loadToken);
-  },
-
-  setNow() {
-    actions.goToday();
   },
 
   resetCamera() {
@@ -681,19 +723,14 @@ const actions: AppActions = {
     }
     const window = state.detailWindow ?? defaultDetailWindow();
     if (!window) return;
-    store.setState({ detailPanelOpen: true, detailWindow: window, pickingArea: false, hover: null });
+    store.setState({ detailPanelOpen: true, detailWindow: window, hover: null });
     scene.setDetailWindow(window);
-    // Start from the wide city view so the selected window has visible context.
-    scene.resetCamera();
-    store.setState({ cameraAzimuthDeg: scene.getCameraAzimuth() });
   },
 
   closeDetailPanel() {
     if (!store.getState().detailPanelOpen && !store.getState().detailWindow) return;
     store.setState({ detailPanelOpen: false, detailWindow: null });
     scene.setDetailWindow(null);
-    scene.resetCamera();
-    store.setState({ cameraAzimuthDeg: scene.getCameraAzimuth() });
   },
 
   setDetailWindow(window) {
@@ -712,24 +749,25 @@ const actions: AppActions = {
 
   loadDetailArea() {
     const state = store.getState();
-    if (state.phase !== 'ready' || !state.model || !state.city || !state.detailWindow) return;
+    const frame = currentModelDetailFrame();
+    if (state.phase !== 'ready' || !state.model || !state.city || !state.detailWindow || !frame) {
+      return;
+    }
+    // The loaded model already contains everything inside it; generating the
+    // same data again would only cost time. Focus is the correct action there.
+    if (detailWindowInsideModel(state.detailWindow, frame)) {
+      actions.focusDetailWindow();
+      addNotice('That area is already loaded — Focus frames it without rebuilding.');
+      return;
+    }
     const geo = detailWindowToGeo(state.city, state.detailWindow);
+    const name = `Near ${state.city.name}`;
+    addNotice(`Building a high-detail model near ${state.city.name}…`);
     void loadCity(
-      { kind: 'point', lat: geo.lat, lon: geo.lon, name: 'Selected area' },
-      'Selected area',
+      { kind: 'point', lat: geo.lat, lon: geo.lon, name },
+      name,
       { preserveTime: true }
     );
-  },
-
-  beginAreaPick() {
-    const state = store.getState();
-    if (state.phase !== 'ready' || !state.model) return;
-    store.setState({ pickingArea: true, hover: null });
-    addNotice('Tap or click the city to move the model there. Esc cancels.');
-  },
-
-  cancelAreaPick() {
-    if (store.getState().pickingArea) store.setState({ pickingArea: false });
   },
 
   dismissHover() {
@@ -764,14 +802,6 @@ function hideHover(force = false): void {
   store.setState({ hover: null });
 }
 
-function scheduleStickyHide(): void {
-  clearStickyTimer();
-  stickyTimer = window.setTimeout(() => {
-    stickyTimer = null;
-    if (store.getState().hover?.sticky) store.setState({ hover: null });
-  }, STICKY_TOOLTIP_MS);
-}
-
 function showTooltip(clientX: number, clientY: number, sticky: boolean): void {
   const feature = scene.hitTest(clientX, clientY);
   if (!feature) {
@@ -779,25 +809,65 @@ function showTooltip(clientX: number, clientY: number, sticky: boolean): void {
     return;
   }
   store.setState({ hover: { feature, x: clientX, y: clientY, sticky } });
-  if (sticky) scheduleStickyHide();
-  else clearStickyTimer();
+  // Pinned tooltips stay until dismissed or another feature is activated, so
+  // keyboard/screen-reader users have time to read them.
+  clearStickyTimer();
 }
 
-/** Inverse of the server's local equirectangular projection (metres → WGS84). */
-function latLonFromGround(x: number, z: number): { lat: number; lon: number } | null {
-  const city = store.getState().city;
-  if (!city) return null;
-  const cosLat = Math.max(0.0001, Math.cos((city.lat * Math.PI) / 180));
-  return {
-    lat: city.lat - z / METRES_PER_DEGREE,
-    lon: city.lon + x / (METRES_PER_DEGREE * cosLat)
-  };
-}
+canvas.addEventListener('keydown', (event) => {
+  const state = store.getState();
+  if (state.phase !== 'ready') return;
+  const step = event.shiftKey ? 320 : 90;
+  const azimuth = (scene.getCameraAzimuth() * Math.PI) / 180;
+  // Screen-aligned pan: forward is toward the top of the viewport.
+  const forwardX = -Math.sin(azimuth);
+  const forwardZ = Math.cos(azimuth);
+  const rightX = Math.cos(azimuth);
+  const rightZ = Math.sin(azimuth);
+  let dx = 0;
+  let dz = 0;
+  switch (event.key) {
+    case 'ArrowUp':
+      dx = forwardX * step;
+      dz = forwardZ * step;
+      break;
+    case 'ArrowDown':
+      dx = -forwardX * step;
+      dz = -forwardZ * step;
+      break;
+    case 'ArrowLeft':
+      dx = -rightX * step;
+      dz = -rightZ * step;
+      break;
+    case 'ArrowRight':
+      dx = rightX * step;
+      dz = rightZ * step;
+      break;
+    case '+':
+    case '=':
+      event.preventDefault();
+      event.stopPropagation();
+      scene.zoomBy(1.2);
+      return;
+    case '-':
+    case '_':
+      event.preventDefault();
+      event.stopPropagation();
+      scene.zoomBy(1 / 1.2);
+      return;
+    default:
+      return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  hideHover();
+  scene.panBy(dx, dz);
+});
 
 canvas.addEventListener('pointermove', (event) => {
   if (event.pointerType !== 'mouse' || event.buttons !== 0) return;
   const state = store.getState();
-  if (state.pickingArea || state.phase !== 'ready') return;
+  if (state.phase !== 'ready') return;
   const now = performance.now();
   if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
   lastHoverAt = now;
@@ -829,27 +899,6 @@ canvas.addEventListener('pointerup', (event) => {
   if (moved > 8) return;
 
   const state = store.getState();
-  if (state.pickingArea) {
-    const ground = scene.getGroundPoint(event.clientX, event.clientY);
-    if (!ground) {
-      store.setState({ pickingArea: false });
-      addNotice('Could not read that point on the model. Try again.');
-      return;
-    }
-    const latLon = latLonFromGround(ground.x, ground.z);
-    if (!latLon) {
-      store.setState({ pickingArea: false });
-      return;
-    }
-    const name = `Near ${state.city?.name ?? 'here'}`;
-    store.setState({ pickingArea: false, hover: null });
-    addNotice(`Moving the model to ${latLon.lat.toFixed(4)}, ${latLon.lon.toFixed(4)}…`);
-    void loadCity({ kind: 'point', lat: latLon.lat, lon: latLon.lon, name }, name, {
-      preserveTime: true
-    });
-    return;
-  }
-
   if (state.phase === 'ready') showTooltip(event.clientX, event.clientY, true);
 });
 
@@ -869,9 +918,9 @@ ui.update(store.getState());
 
 store.subscribe((state, previous) => {
   if (state.model !== previous.model && state.model) {
-    if (state.hover || state.pickingArea) {
+    if (state.hover) {
       clearStickyTimer();
-      store.setState({ hover: null, pickingArea: false });
+      store.setState({ hover: null });
     }
     scene.setModel(state.model);
     scene.setTime(state.minute);
@@ -902,6 +951,7 @@ declare global {
     __sunlight?: {
       getState: () => AppState;
       getSceneDebug: () => ReturnType<SceneHandle['getDebug']>;
+      renderNow: () => void;
       actions: AppActions;
       loadCity: (target: ModelTarget, label?: string | null, options?: LoadOptions) => Promise<void>;
       hitTest: (x: number, y: number) => ReturnType<SceneHandle['hitTest']>;
@@ -914,6 +964,7 @@ declare global {
 window.__sunlight = {
   getState: () => store.getState(),
   getSceneDebug: () => scene.getDebug(),
+  renderNow: () => scene.renderNow(),
   actions,
   loadCity,
   hitTest: (x, y) => scene.hitTest(x, y),

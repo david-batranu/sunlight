@@ -128,7 +128,6 @@ export async function readState(page) {
       namedAreas: state.model?.areas?.filter((area) => !!area.n).length ?? 0,
       cameraAzimuthDeg: state.cameraAzimuthDeg,
       hover: state.hover ? { name: state.hover.feature.name, kind: state.hover.feature.kind, sticky: state.hover.sticky } : null,
-      pickingArea: state.pickingArea,
       detailPanelOpen: state.detailPanelOpen,
       detailWindow: state.detailWindow ? { ...state.detailWindow } : null,
       sky: state.sky
@@ -250,6 +249,9 @@ export async function canvasPixelStats(page) {
       new Promise((resolve, reject) => {
         requestAnimationFrame(() => {
           try {
+            // The scene renders on demand, so force a frame before reading the
+            // default (non-preserved) WebGL drawing buffer.
+            window.__sunlight?.renderNow?.();
             const canvas = document.getElementById('scene');
             const gl = canvas.getContext('webgl2');
             if (!gl) throw new Error('no webgl2 context');

@@ -1,6 +1,6 @@
 # Sunlight architecture
 
-This document describes how Sunlight turns a city name into a lit, explorable diorama. It is the companion to [`docs/CONTRACT.md`](CONTRACT.md), which pins down module interfaces and ownership.
+This document describes how Sunlight turns a city name into a lit, explorable diorama. It is the companion to [`docs/CONTRACT.md`](CONTRACT.md), which pins down module interfaces and responsibilities.
 
 ## 1. System overview
 
@@ -19,7 +19,7 @@ This document describes how Sunlight turns a city name into a lit, explorable di
 │  job queue + worker_thread generation pipeline                                  │
 │  providers: Overpass → official OSM API (adaptive tiles) → seeds → fixture       │
 │  sky service: astronomy-engine day payloads (LRU)                               │
-│  disk cache: models gz + meta, raw provider responses, seeds                    │
+│  disk cache: models gz + meta, seeds                                             │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,11 +124,11 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 
 ```json
 {
-  "v": 1,
+  "v": 4,
   "key": "gn-683844-r1500-v4",
   "city": { "geonameId": 683844, "name": "Brașov", "country": "RO", "lat": 45.64861, "lon": 25.60613, "tz": "Europe/Bucharest" },
   "meta": { "generatedAt": "...", "source": "overpass", "seed": false, "radiusM": 1500,
-            "stats": { "buildings": 4812, "roads": 530, "areas": 44, "dropped": 0 },
+            "stats": { "buildings": 8465, "roads": 1300, "areas": 289, "dropped": 0 },
             "warnings": [], "attribution": "© OpenStreetMap contributors (ODbL 1.0)" },
   "bounds": { "minX": -15000, "maxX": 15000, "minZ": -15000, "maxZ": 15000, "maxHeight": 1214 },
   "terrain": { "x0": -15000, "z0": -15000, "step": 625, "cols": 49, "rows": 49, "h": [ ... 2401 heights ... ], "baseM": 550, "source": "AWS Terrain Tiles" },
@@ -141,7 +141,7 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 - Units: decimetres; the renderer divides by 10.
 - Key: `<city-or-point>-r<radius>-v<model version>`.
 - Metadata includes source, stats, warnings and attribution. `bounds` are the actual geometry extents (≤ the requested radius), not a fixed square.
-- Strong ETag (SHA-256) + immutable cache headers; version bumps invalidate naturally.
+- Strong ETag (SHA-256) + immutable cache headers for healthy models. Models marked `meta.degraded` (terrain or partial-coverage failure) are served with a short cache and regenerated on the next request; seed bakes treat degraded entries as stale.
 
 ## 6. Cache and jobs
 
@@ -149,8 +149,8 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 - **Hot cache**: recent model buffers/sky payloads are kept in memory.
 - **Provider cache**: not implemented in v1 — generated models are cached, upstream responses are not.
 - **Seeds**: bundled, SHA-verified, read-only; served before cache/generation.
-- **Jobs**: in-memory FIFO queue, one worker by default, dedupe by key, monotonic progress, cancellation, TTL cleanup. A finished job writes the model; after a restart the cache still serves it.
-- **Versioning**: `MODEL_VERSION` in `shared/constants.ts`; bump + `npm run cache:clear` for format changes.
+- **Jobs**: in-memory FIFO queue, one worker by default, dedupe by key, monotonic progress, cancellation, TTL cleanup, a queue-depth/per-client cap (`JOB_QUEUE_MAX`, `JOB_PER_CLIENT_MAX`), a queued-age timeout and a negative cache for failed keys. Worker boot crashes fall back to in-process generation once and set a truthful health state; a finished job writes the model, so after a restart the cache still serves it.
+- **Versioning**: `MODEL_VERSION` in `shared/constants.ts`; bump + re-bake seeds + clear the cache for format changes. Startup ignores/prunes cache entries whose key or metadata model version/radius doesn't match, and a guard test checks the committed seed manifest against the constants.
 
 ## 7. Ephemeris and time model
 
@@ -164,10 +164,10 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 ## 8. Rendering and lighting
 
 - **Camera**: orthographic, isometric pitch (35.264°) default from the south-east with north-west up (azimuth 135°), 0.45–32× zoom, fit to the ~3.16 km base and up to ~120 m of relief. Pan on the ground plane, orbit, zoom, reset; damped and clamped. Sun direction is world-fixed and independent of the camera.
-- **Geometry**: merged vertex-coloured, flat-shaded terrain heightfield with perimeter skirt, merged buildings, roads/rail ribbons and earcut-triangulated areas with holes draped over the heightfield; steep forest polygons are baked into the terrain colour to avoid sticker-like overlays on slopes; a warm clay-edged plinth. One draw call per material family, no per-frame allocations. A parallel per-triangle feature-index table lets the scene raycast the merged meshes and resolve the named building/road/area under the pointer.
-- **Area picker / detail window**: one top-bar tool opens a 5 km-radius minimap. A one-time OSM raster overview supplies surrounding context (browser-cached, with a loaded-model fallback when offline); the loaded 3 km model footprint and a draggable 100–1500 m detail square are overlaid. A shader uniform keeps the detail square sharp and mutes/desaturates the 3D context; moving/resizing makes no OSM data requests. **Focus** fits the camera with context margin. **Load area** converts the selected model-space centre back to WGS84 and generates/caches a new point model.
-- **Interaction**: the SPA raycasts on throttled pointer hover and on taps for named-feature tooltips; the orientation compass rotates with the camera. The combined **Area** picker handles both local detail-window focus and choosing a new model centre (via **Load area**, inverse-projected to WGS84 and generated/cached like any point target).
-- **Lights**: sun and moon `DirectionalLight`s + hemisphere ambient. Sun shadows during the day; moon shadows at night under the thresholds above; adaptive orthographic shadow camera for long low-sun shadows; PCFSoft 2048 (1024 low quality).
+- **Geometry**: merged vertex-coloured, flat-shaded terrain heightfield with perimeter skirt (2×2 subdivisions per grid cell), merged buildings, roads/rail ribbons and earcut-triangulated areas with holes draped over the heightfield; steep forest polygons are baked into the terrain colour to avoid sticker-like overlays on slopes; a warm clay-edged plinth. Vertex colours are packed to normalized Uint8 and normals are omitted for the flat-shaded material, cutting VBO/upload volume by roughly 45%. One draw call per material family and no per-frame allocations. An on-demand render scheduler skips rendering when the camera, lighting and model are settled (idle = 0 rendered frames/s); debug exposes rolling median/p95 intervals, `framesRendered` and the active quality/DPR. A parallel per-triangle feature-index table lets the scene raycast the merged meshes and resolve the named building/road/area under the pointer.
+- **Area picker / detail window**: one top-bar tool opens a 5 km-radius minimap, zoomable down to a 625 m radius for precise placement. A one-time OSM raster overview supplies surrounding context (browser-cached, with a loaded-model fallback when offline); the loaded 3 km model footprint and a draggable 100–1500 m detail square are overlaid. A shader uniform keeps the detail square sharp and mutes/desaturates the 3D context; moving/resizing makes no OSM data requests. **Focus** always frames inward (never zooms out) with context margin; **Load area** is only enabled outside the loaded city, converts the selected model-space centre back to WGS84 and generates/caches a new point model. A filterable **Named places** list in the light panel provides a keyboard/screen-reader alternative to pointer-only tooltips.
+- **Interaction**: the SPA raycasts on throttled pointer hover and on taps for named-feature tooltips; the orientation compass rotates with the camera. The focusable diorama canvas supports keyboard pan/zoom (arrows, `+`/`-`, Shift for larger pan steps) and the Named places list covers feature access without a pointer. The combined **Area** picker handles both local detail-window focus and choosing a new model centre (via **Load area**, inverse-projected to WGS84 and generated/cached like any point target).
+- **Lights**: sun and moon `DirectionalLight`s + hemisphere ambient. Sun shadows during the day; moon shadows at night under the thresholds above; adaptive orthographic shadow camera for long low-sun shadows; PCF 2048 (1024 low quality). Shadows are rebuilt only when the lighting/model/quality changes, not when the camera moves.
 - **Palette**: smooth altitude-based interpolation between night / astronomical / nautical / blue hour / golden / day states for background, ambient, fog and light colour. The canvas is transparent over a CSS sky backdrop updated by the UI, so the chrome and the sky always agree.
 - **UI readouts**: sun-path compass with horizon and N/E/S/W, current sun/moon markers, day/night shading, sunrise/sunset ticks, altitude/azimuth, moon phase icon, shadow-length multiplier, timezone offset. A separate orientation compass rotates with the camera and doubles as reset-view; hover/tap tooltips identify named buildings, streets, parks and water; the **Area** picker combines a 5 km overview, detail-window focus and loading a new centre.
 
@@ -175,7 +175,8 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/health` | Version, cache/queue stats, provider state, seeds |
+| GET | `/api/health` | Truthful ready/degraded state, build identity, checks, cache/queue/worker/provider stats, HTTP counters |
+| GET | `/api/ready` | 200 when serviceable, 503 when unready |
 | GET | `/api/cities?q=&limit=` | Local GeoNames search |
 | GET | `/api/cities/nearest?lat=&lon=` | Nearest indexed city |
 | POST | `/api/models` | Resolve/queue a city or point model |
@@ -185,22 +186,22 @@ Stored gzipped at `CACHE_DIR/models/<key>.json.gz`; see `shared/types.ts` for th
 | GET | `/api/sky?lat=&lon=&date=` | Sun/moon track + almanac |
 | GET | `/*` | Static SPA + history fallback |
 
-Errors are structured (`{error:{code,message,retryable,details?}}`). Request bodies are capped at 16 KB, coordinates/date/limits are validated, and generation is rate-limited per IP.
+Errors are structured (`{error:{code,message,retryable,details?}}`). Request bodies are capped at 16 KB, coordinates/date/limits are validated, and per-client limits apply to generation, city search and sky endpoints. The client identity is the socket IP by default; set `TRUST_PROXY=1` behind a trusted reverse proxy to use a validated `X-Forwarded-For`. Health/readiness probes are exempt.
 
 ## 10. Security and operations
 
 - Same-origin only; no CORS surface, no cookies, no analytics.
-- Security headers: CSP (self assets, inline styles for SVG), nosniff, referrer policy, geolocation-only permission policy, frame denial, CORP.
+- Security headers: CSP (self assets, inline styles for SVG, the optional OSM tile host), HSTS, nosniff, referrer policy, geolocation-only permission policy, frame denial, CORP/COOP. The Area picker's tile requests are disclosed in About; HSTS is emitted by the app and mirrored in `deploy/Caddyfile` guidance.
 - Static server prevents path traversal, serves immutable hashed assets, gzips text, and sets an SPA fallback only for extensionless routes.
 - Model keys and job IDs are strictly validated; no user-controlled filesystem paths.
 - Docker runtime is non-root, with a healthcheck and a persistent cache volume. The image is multi-stage and contains only the built bundles, static assets, seeds and city index.
-- Logging is minimal and structured on stdout. No personal data is stored; geolocation is used only to resolve the nearest city.
+- Request logging is enabled with `SUNLIGHT_LOG_LEVEL=info` and health exposes request/error/rate-limit counters and a bounded p95. No accounts, cookies or analytics are stored; geolocation is used only to resolve the nearest city, and point deep links may carry chosen coordinates.
 
 ## 11. Performance budgets
 
 - SPA initial payload target < 300 KB gzipped (Three.js + app).
 - Model seed target ≤ 500 KB gzipped; a 20k-building cap and decimetre quantization keep payloads predictable.
-- Rendering: <25 draw calls and <750k triangles for a normal city; 55–60 fps on an M-series Mac at 1440×900 with 2048 shadows; adaptive DPR/shadow quality on slower devices.
+- Rendering: 6 draw calls / ~245k triangles when settled at the wide view (9 / ~439k with the shadow pass on the last invalidation); 0 rendered frames/s while paused/settled; adaptive DPR/shadow quality on phones and low-end devices. A normal city must stay under 25 draw calls and 750k triangles.
 - Search latency <100 ms server-side; sky computed in milliseconds and cached; model cache hits served as pre-compressed bytes.
 - First generation target under 60 s with Overpass, under ~2 minutes with the tiled OSM fallback; seeds are instant.
 
@@ -208,9 +209,9 @@ Errors are structured (`{error:{code,message,retryable,details?}}`). Request bod
 
 - **Unit** (`node --test`): projection/clipping/simplification, parsers and relation assembly, height inference, cache/job state, search normalization/ranking, DST/timezone conversion, ephemeris values and polar cases, lighting-direction math, URL/time helpers, UI formatters.
 - **Integration**: in-process app with the fixture provider and a temp cache — job lifecycle, cache hits, ETag/304, concurrent dedupe, validation errors, sky payload.
-- **E2E** (Playwright-core + system Chrome): seed-only server, blocked external network, fixed dates/times, screenshots for noon/golden hour/night/mobile, assertions on labels, sun direction, camera interactions and responsive layout.
+- **E2E** (Playwright-core + system Chrome): seed-only server, blocked external network by default, fixed dates/times, screenshots for noon/golden hour/night/mobile, assertions on labels, sun direction, camera interactions, responsive layout, idle rendering, keyboard/Space behavior and the Area sheet at 200% zoom. CI runs typecheck + unit/integration + E2E before publishing an image.
 - **Visual review**: screenshots in `qa/shots/` inspected for diorama quality, shadow direction/artifacts, palette transitions and mobile layout.
-- **Ops**: `docker compose up --build` smoke test, `/api/health`, cache persistence across restarts.
+- **Ops**: `docker compose up --build` smoke test, `/api/health` + `/api/ready`, seed-manifest/version guard, cache persistence across restarts. The runtime container is read-only with a writable cache volume and tmpfs `/tmp`.
 
 ## 13. Extension points
 

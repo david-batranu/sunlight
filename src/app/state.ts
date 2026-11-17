@@ -29,8 +29,6 @@ export interface AppState {
   cameraAzimuthDeg: number;
   /** Feature under the pointer / tapped feature, or null. */
   hover: HoverInfo | null;
-  /** True while the user is choosing a new model centre on the diorama. */
-  pickingArea: boolean;
   /** High-quality window inside the loaded model; null means the whole model. */
   detailWindow: DetailWindow | null;
   /** True while the minimap detail picker is open. */
@@ -118,7 +116,6 @@ export function createInitialState(): AppState {
     current: null,
     cameraAzimuthDeg: 135,
     hover: null,
-    pickingArea: false,
     detailWindow: null,
     detailPanelOpen: false,
     notices: [],

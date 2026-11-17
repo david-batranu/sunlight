@@ -14,6 +14,7 @@ import { createFixtureProvider } from '../../server/city/providers/fixture.ts';
 import { createOverpassProvider, buildOverpassQuery } from '../../server/city/providers/overpass.ts';
 import { createOsmApiProvider, quarterBoxes } from '../../server/city/providers/osm-api.ts';
 import { createProviderChain } from '../../server/city/providers/chain.ts';
+import { TokenBucket } from '../../server/city/providers/bucket.ts';
 import type { FetchLike } from '../../server/city/providers/http.ts';
 import {
   BRASOV_CITY,
@@ -397,4 +398,110 @@ test('seed mode and SEEDS_ONLY disable generation without network access', async
 test('providerStatusCode values are part of the health contract', () => {
   const statuses: ProviderStatus[] = ['up', 'down', 'unknown'];
   assert.deepEqual(statuses, ['up', 'down', 'unknown']);
+});
+
+/* ------------------------------------------------------------------ */
+/* Upstream budget / retry timing                                      */
+/* ------------------------------------------------------------------ */
+
+test('overpass provider does not sleep after the final failed attempt', async () => {
+  const sleeps: number[] = [];
+  const provider = createOverpassProvider({
+    endpoints: ['https://only.test/api'],
+    userAgent: 'SunlightTest/1.0',
+    retryBackoffMs: 25,
+    fetchImpl: async () => textResponse('saturated', 503),
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    }
+  });
+  await assert.rejects(provider.fetchRaw(fakeRequest()));
+  // maxAttempts = max(2, endpoints*2) = 2 → exactly one inter-attempt backoff.
+  assert.deepEqual(sleeps, [25]);
+});
+
+test('overpass provider honours a Retry-After header between attempts', async () => {
+  const sleeps: number[] = [];
+  const calls: number[] = [];
+  const fetchImpl: FetchLike = async () => {
+    calls.push(Date.now());
+    if (calls.length === 1) {
+      return new Response('slow down', { status: 429, headers: { 'Retry-After': '2' } });
+    }
+    return jsonResponse(OVERPASS_JSON);
+  };
+  const provider = createOverpassProvider({
+    endpoints: ['https://retry.test/api'],
+    userAgent: 'SunlightTest/1.0',
+    retryBackoffMs: 10,
+    fetchImpl,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    }
+  });
+  const raw = await provider.fetchRaw(fakeRequest());
+  assert.equal(raw.ways.length, 1);
+  assert.deepEqual(sleeps, [2000], 'Retry-After must win over the shorter backoff');
+});
+
+test('upstream token buckets refill at the configured rate', () => {
+  let now = 0;
+  const bucket = new TokenBucket({ ratePerSec: 1, burst: 2, now: () => now });
+  assert.equal(bucket.reserve(), 0);
+  assert.equal(bucket.reserve(), 0);
+  const wait = bucket.reserve();
+  assert.ok(wait >= 900 && wait <= 1100, `expected ~1000 ms wait, got ${wait}`);
+  now += wait;
+  assert.equal(bucket.reserve(), 0, 'one token is available after waiting the interval');
+  const nextWait = bucket.reserve();
+  assert.ok(nextWait >= 900, `bucket must wait again when empty, got ${nextWait}`);
+  assert.ok(bucket.waitedMs >= wait + nextWait);
+});
+
+test('osm-api provider flags partial coverage when the tile budget is exhausted', async () => {
+  const xml = await osmXmlFixture();
+  let calls = 0;
+  const fetchImpl: FetchLike = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return textResponse('You requested too many nodes (limit 50000).', 400);
+    }
+    return textResponse(xml);
+  };
+  const provider = createOsmApiProvider({
+    baseUrl: 'https://osm.test/api/0.6/map',
+    userAgent: 'SunlightTest/1.0',
+    maxTiles: 2,
+    fetchImpl,
+    sleep: async () => undefined
+  });
+  const raw = await provider.fetchRaw(fakeRequest());
+  assert.equal(raw.source, 'osm-api');
+  assert.equal(raw.partial, true, 'budget-skipped tiles must mark the raw data partial');
+  assert.ok(raw.warnings.some((warning) => /budget/i.test(warning)));
+  assert.equal(provider.status(), 'up');
+});
+
+test('osm-api retry spacing honours Retry-After instead of the default backoff', async () => {
+  const sleeps: number[] = [];
+  const xml = await osmXmlFixture();
+  let calls = 0;
+  const fetchImpl: FetchLike = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response('rate limited', { status: 429, headers: { 'Retry-After': '3' } });
+    }
+    return textResponse(xml);
+  };
+  const provider = createOsmApiProvider({
+    baseUrl: 'https://osm.test/api/0.6/map',
+    userAgent: 'SunlightTest/1.0',
+    retries: 1,
+    fetchImpl,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    }
+  });
+  await provider.fetchRaw(fakeRequest());
+  assert.ok(sleeps.includes(3000), `expected a 3000 ms Retry-After sleep, got ${sleeps.join(',')}`);
 });

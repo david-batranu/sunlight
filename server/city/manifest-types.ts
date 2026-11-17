@@ -26,6 +26,8 @@ export interface ModelManifestEntry {
   source: CitySource;
   generatedAt: string;
   stats?: ModelStats;
+  /** True when the bake produced an incomplete (terrain/coverage) model. */
+  degraded?: boolean;
 }
 
 export interface SeedManifest {

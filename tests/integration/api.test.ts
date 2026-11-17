@@ -64,14 +64,35 @@ async function pollUntilDone(jobId: string, timeoutMs = 20_000): Promise<JobStat
   assert.fail(`job ${jobId} did not finish in ${timeoutMs}ms`);
 }
 
-test('health reports a ready, seed-aware service', async () => {
+test('health reports a truthful ready state, build identity and checks', async () => {
   const response = await fetch(`${app.url}/api/health`);
   assert.equal(response.status, 200);
+  assert.equal(response.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
   const health = await response.json();
   assert.equal(health.ok, true);
+  assert.equal(health.ready, true);
+  assert.equal(health.degraded, false);
+  assert.equal(health.status, 'ok');
   assert.equal(health.modelVersion, 4);
+  assert.equal(typeof health.version, 'string');
+  assert.ok(health.version.length > 0);
+  assert.equal(typeof health.build.node, 'string');
+  assert.ok(health.build.node.startsWith('v'));
+  assert.ok(health.build !== null && 'sha' in health.build && 'imageTag' in health.build);
   assert.ok(health.cache);
+  assert.equal(health.queue.maxQueued, 8);
+  assert.deepEqual(health.worker, { enabled: true, disabled: false, fallbacks: 0 });
+  assert.ok(Array.isArray(health.checks));
+  assert.ok(health.checks.some((check: { name: string; ok: boolean }) => check.name === 'cache' && check.ok));
   assert.ok(Array.isArray(health.seeds.slugs));
+});
+
+test('readiness probe returns 200 for a ready service', async () => {
+  const response = await fetch(`${app.url}/api/ready`);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ready, true);
+  assert.equal(body.ok, true);
 });
 
 test('city search is diacritic-insensitive and flags seeds', async () => {
@@ -106,6 +127,8 @@ test('generates a model with the fixture provider, then serves it from cache wit
   const first = await fetch(`${app.url}${modelUrl}`);
   assert.equal(first.status, 200);
   assert.equal(first.headers.get('content-encoding'), 'gzip');
+  assert.equal(first.headers.get('cache-control'), 'private, max-age=31536000, immutable');
+  assert.equal(first.headers.get('x-model-degraded'), null);
   const etag = first.headers.get('etag');
   assert.ok(etag && etag.length > 4);
   const model = (await first.json()) as CityModel;
@@ -175,6 +198,29 @@ test('sky endpoint rejects dates outside 1900-2100 and malformed params', async 
   }
 });
 
+test('oversized request bodies are rejected with 413', async () => {
+  const oversized = JSON.stringify({
+    target: { kind: 'city', geonameId: 683844 },
+    padding: 'x'.repeat(20 * 1024)
+  });
+  const response = await fetch(`${app.url}/api/models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: oversized
+  });
+  assert.equal(response.status, 413);
+  const body = await response.json();
+  assert.equal(body.error.code, 'BODY_TOO_LARGE');
+
+  const invalidJson = await fetch(`${app.url}/api/models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{"target":'
+  });
+  assert.equal(invalidJson.status, 400);
+  assert.equal((await invalidJson.json()).error.code, 'INVALID_JSON');
+});
+
 test('invalid model targets and missing resources return structured errors', async () => {
   const invalid = await fetch(`${app.url}/api/models`, {
     method: 'POST',
@@ -193,4 +239,34 @@ test('invalid model targets and missing resources return structured errors', asy
 
   const unknownCity = await postModel({ kind: 'city', geonameId: 999999999 });
   assert.equal(unknownCity.status, 404);
+});
+
+test('model HTTP contract: HEAD, invalid keys and method handling', async () => {
+  const created = await postModel({ kind: 'city', geonameId: 683844 });
+  assert.equal(created.status, 200);
+  assert.equal(created.body.state, 'ready');
+  const modelUrl = created.body.state === 'ready' ? created.body.modelUrl : '';
+
+  const head = await fetch(`${app.url}${modelUrl}`, { method: 'HEAD' });
+  assert.equal(head.status, 200);
+  assert.ok(Number(head.headers.get('content-length')) > 0);
+  assert.ok(head.headers.get('etag'));
+  assert.equal(await head.text(), '', 'HEAD responses must not carry a body');
+
+  const badKey = await fetch(`${app.url}/api/models/not-a-model-key`);
+  assert.equal(badKey.status, 400);
+  const badBody = await badKey.json();
+  assert.equal(badBody.error.code, 'INVALID_MODEL_KEY');
+
+  const reserved = await fetch(`${app.url}/api/models`);
+  assert.equal(reserved.status, 405);
+  assert.match(reserved.headers.get('allow') || '', /POST/);
+
+  const put = await fetch(`${app.url}/api/models`, { method: 'PUT' });
+  assert.equal(put.status, 405);
+  assert.ok(put.headers.get('allow'));
+
+  const headHealth = await fetch(`${app.url}/api/health`, { method: 'HEAD' });
+  assert.equal(headHealth.status, 200);
+  assert.equal(await headHealth.text(), '');
 });

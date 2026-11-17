@@ -1,7 +1,7 @@
 # Sunlight — implementation contract
 
-This file is the coordination point for the workstreams. Read it before touching
-files. The lead owns this file.
+This file documents the module interfaces and responsibilities. Keep it in sync
+when a contract changes.
 
 ## Ground rules
 
@@ -70,12 +70,7 @@ export interface CityService {
   getJob(jobId: string): JobStatus | null;
   cancelJob(jobId: string): boolean;
   readModel(key: string): Promise<ReadyModel | null>;
-  health(): {
-    cache: { models: number; bytes: number; maxBytes: number };
-    queue: { active: number; queued: number };
-    providers: Record<string, 'up' | 'down' | 'unknown'>;
-    seeds: { count: number; slugs: string[] };
-  };
+  health(): CityServiceHealth; // cache/queue/providers/seeds + ready/degraded/worker/checks
   shutdown(): Promise<void>;
 }
 
@@ -135,7 +130,7 @@ Requirements: 289 samples (5-minute local minute steps, 00:00…24:00), sun/moon
 altitude+azimuth, almanac events, moon phase, polar flags, `SKY_VERSION`, tz.
 Handle DST gaps/overlaps deterministically. No caching in the pure functions.
 
-## Client state and actions (lead)
+## Client state and actions
 
 `src/app/state.ts`: `AppState`, `CurrentLight`, `createStore`, `createInitialState`.
 `src/app/contracts.ts`: `LoadPhase`, `AppActions`, `SceneHandle`, `SceneDebug`,
@@ -146,7 +141,7 @@ Handle DST gaps/overlaps deterministically. No caching in the pure functions.
 interpolation).
 `src/app/url.ts`: URL state round-trip.
 
-## Scene (`src/scene/**`, scene-engineer)
+## Scene (`src/scene/**`)
 
 `src/scene/scene.ts` exports:
 
@@ -187,7 +182,8 @@ triangles, FPS, model key. `window.__sunlight` is installed by `main.ts`.
 export function createUI(root: HTMLElement, ctx: UIContext): UIHandle;
 ```
 
-`AppActions` additionally exposes `beginAreaPick()`, `cancelAreaPick()` and
+`AppActions` additionally exposes `toggleDetailPanel()`, `closeDetailPanel()`,
+`setDetailWindow()`, `focusDetailWindow()`, `loadDetailArea()`, `dismissHover()` and
 `dismissHover()`. `AppState` carries `cameraAzimuthDeg`, `hover` (HoverInfo) and
 `pickingArea` for the compass, tooltips and choose-area hint. `UIContext`
 contains the store, actions, `searchCities(query)` and `nearestCity(lat, lon)`. The UI owns all DOM, search modal, generation overlay,
@@ -215,7 +211,7 @@ The lead wires the city service, sky service and static SPA serving.
 - Unit tests in `tests/unit/*.test.ts`, run with `node --test` (TS native).
 - Integration tests in `tests/integration/*.test.ts` (spawn the server with a
   fixture provider and a temp cache).
-- E2E in `tests/e2e/*.spec.mjs` driven by `scripts/e2e.mjs` with Playwright-core.
+- E2E in `tests/e2e/*.test.mjs` driven by `scripts/e2e.mjs` with Playwright-core.
 - Browser tests must block external network and use seed models.
 
 ## Accepted plan deviations
@@ -235,6 +231,8 @@ The lead wires the city service, sky service and static SPA serving.
 window; `setDetailWindow({centerX,centerZ,radiusM})` updates it; `focusDetailWindow()`
 fits the camera; and `loadDetailArea()` recentres/generates a new 3 km model at
 the window centre. `SceneHandle.setDetailWindow()` applies the shader mask and
-`SceneHandle.focusDetailWindow()` handles the camera fit. Model-space window
+`SceneHandle.focusDetailWindow()` handles the camera fit (snapping under reduced
+motion), `panBy()`/`zoomBy()` power keyboard navigation, and `renderNow()` lets
+tests force a readback frame while on-demand rendering is settled. Model-space window
 coordinates are metres relative to the model centre; `detailWindowToGeo()`
 converts the centre back to WGS84.

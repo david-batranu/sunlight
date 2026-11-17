@@ -8,7 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { ModelCache } from '../../server/city/model-cache.ts';
-import { sha256Hex } from '../../server/city/model-io.ts';
+import { MODEL_GZIP_LEVEL, sha256Hex } from '../../server/city/model-io.ts';
 import {
   BRASOV_CITY,
   TEST_MODEL_VERSION,
@@ -23,14 +23,14 @@ import {
 const KEY = cityKey(683844);
 const TARGET = { kind: 'city' as const, geonameId: 683844 };
 
-function writeInfo(metaSeed = false) {
+function writeInfo(metaSeed = false, modelVersion = 1, radiusM = 900) {
   return {
     meta: makeMeta({ seed: metaSeed }),
     city: BRASOV_CITY,
     target: TARGET,
     seedSlug: metaSeed ? 'brasov' : null,
-    modelVersion: 1,
-    radiusM: 900
+    modelVersion,
+    radiusM
   };
 }
 
@@ -189,14 +189,25 @@ test('reading an entry refreshes its LRU position', async () => {
   }
 });
 
-test('a zero byte budget means unlimited cache', async () => {
-  await withCache(0, async (cache) => {
+test('a zero byte budget explicitly disables the disk cache', async () => {
+  const dir = await makeTempDir('sunlight-cache-');
+  try {
+    const cache = new ModelCache(dir, 0);
+    await cache.init();
+    assert.equal(cache.cacheEnabled, false);
     for (const key of ['gn-1-r900-v1', 'gn-2-r900-v1']) {
-      await cache.write(key, gzipModelSync(makeModel(key)), writeInfo());
+      const entry = await cache.write(key, gzipModelSync(makeModel(key)), writeInfo());
+      assert.ok(entry.gzipBytes > 0);
     }
-    assert.equal(cache.models, 2);
-    assert.equal(cache.maxBytesLimit, Number.POSITIVE_INFINITY);
-  });
+    assert.equal(cache.models, 0);
+    assert.equal(cache.bytes, 0);
+    assert.equal(cache.maxBytesLimit, 0);
+    assert.equal(await cache.read('gn-1-r900-v1'), null);
+    // Nothing was written to disk, so the cache directory was never created.
+    await assert.rejects(readdir(path.join(dir, 'models')));
+  } finally {
+    await removeTempDir(dir);
+  }
 });
 
 test('clear removes every cached file', async () => {
@@ -217,4 +228,88 @@ test('write is atomic: no temp files are left behind', async () => {
     const files = await readdir(path.join(dir, 'models'));
     assert.equal(files.some((file) => file.includes('.tmp-')), false);
   });
+});
+
+test('init prunes entries generated for another model version', async () => {
+  const dir = await makeTempDir('sunlight-cache-');
+  try {
+    const writer = new ModelCache(dir, 1_000_000);
+    await writer.init();
+    for (const key of ['gn-1-r900-v1', 'gn-2-r900-v1']) {
+      await writer.write(key, gzipModelSync(makeModel(key)), writeInfo(false, 1, 900));
+    }
+    const reader = new ModelCache(dir, 1_000_000, { modelVersion: 2, radiusM: 900 });
+    await reader.init();
+    assert.equal(reader.models, 0);
+    assert.equal(reader.bytes, 0);
+    assert.deepEqual(reader.pruneStats, {
+      mismatchedVersion: 2,
+      mismatchedRadius: 0,
+      invalidKey: 0,
+      corrupt: 0
+    });
+    assert.deepEqual(await readdir(path.join(dir, 'models')), []);
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+test('init prunes entries generated for another radius', async () => {
+  const dir = await makeTempDir('sunlight-cache-');
+  try {
+    const writer = new ModelCache(dir, 1_000_000);
+    await writer.init();
+    await writer.write('gn-1-r900-v4', gzipModelSync(makeModel('gn-1-r900-v4')), writeInfo(false, 4, 900));
+    const reader = new ModelCache(dir, 1_000_000, { modelVersion: 4, radiusM: 1500 });
+    await reader.init();
+    assert.equal(reader.models, 0);
+    assert.equal(reader.pruneStats.mismatchedRadius, 1);
+    assert.deepEqual(await readdir(path.join(dir, 'models')), []);
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+test('init keeps entries that match the runtime version and radius', async () => {
+  const dir = await makeTempDir('sunlight-cache-');
+  try {
+    const key = 'gn-1-r1500-v4';
+    const gzipped = gzipModelSync(makeModel(key));
+    const writer = new ModelCache(dir, 1_000_000);
+    await writer.init();
+    await writer.write(key, gzipped, writeInfo(false, 4, 1500));
+    const reader = new ModelCache(dir, 1_000_000, { modelVersion: 4, radiusM: 1500 });
+    await reader.init();
+    assert.equal(reader.models, 1);
+    assert.deepEqual(reader.pruneStats, {
+      mismatchedVersion: 0,
+      mismatchedRadius: 0,
+      invalidKey: 0,
+      corrupt: 0
+    });
+    assert.ok(await reader.read(key));
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+test('init prunes an entry whose sidecar build does not match the runtime', async () => {
+  const dir = await makeTempDir('sunlight-cache-');
+  try {
+    const key = 'gn-1-r1500-v4';
+    const writer = new ModelCache(dir, 1_000_000);
+    await writer.init();
+    // Key advertises v4/r1500 but the sidecar records another radius.
+    await writer.write(key, gzipModelSync(makeModel(key)), writeInfo(false, 4, 900));
+    const reader = new ModelCache(dir, 1_000_000, { modelVersion: 4, radiusM: 1500 });
+    await reader.init();
+    assert.equal(reader.models, 0);
+    assert.ok(reader.pruneStats.mismatchedVersion + reader.pruneStats.mismatchedRadius >= 1);
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+test('model gzip level stays at the cheap L6 setting', () => {
+  assert.equal(MODEL_GZIP_LEVEL, 6);
 });

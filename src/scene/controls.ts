@@ -153,6 +153,30 @@ export class DioramaControls {
     this.mode = 'none';
   }
 
+  /** Pan the target in world XZ by a relative amount. */
+  panBy(dx: number, dz: number): void {
+    const [x, z] = clampTarget(this.desiredX + dx, this.desiredZ + dz, this.bounds);
+    this.desiredX = x;
+    this.desiredZ = z;
+    this.mode = 'none';
+  }
+
+  /** Multiply the target zoom (clamped to the scene limits). */
+  zoomBy(factor: number): void {
+    this.desiredZoom = clampZoom(this.desiredZoom * factor);
+    this.mode = 'none';
+  }
+
+  /** Snap directly to the current targets (reduced-motion / tests). */
+  snap(): void {
+    this.azimuth = this.desiredAzimuth;
+    this.pitch = this.desiredPitch;
+    this.zoom = this.desiredZoom;
+    this.x = this.desiredX;
+    this.z = this.desiredZ;
+    this.mode = 'none';
+  }
+
   reset(): void {
     this.desiredAzimuth = DEFAULT_AZIMUTH_DEG;
     this.desiredPitch = DEFAULT_PITCH_DEG;

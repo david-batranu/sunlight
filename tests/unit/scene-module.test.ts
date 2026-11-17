@@ -85,3 +85,70 @@ test('scene implements the picking contract without painting the canvas', () => 
   assert.ok(scene.source.includes('ndcFromClient'));
   assert.ok(scene.source.includes('groundPointFromRay'));
 });
+
+test('shadows are on demand and use the supported PCF filter', () => {
+  const scene = sceneSources().find((file) => file.name === 'scene.ts');
+  assert.ok(scene);
+  assert.ok(
+    /shadowMap\.autoUpdate\s*=\s*false/.test(scene.source),
+    'shadowMap.autoUpdate must be disabled: camera motion must not rebuild depth maps'
+  );
+  assert.ok(
+    /shadowMap\.needsUpdate\s*=\s*true/.test(scene.source),
+    'lighting/model/quality changes must invalidate the shadow map explicitly'
+  );
+  assert.ok(
+    scene.source.includes('THREE.PCFShadowMap'),
+    'the removed PCFSoftShadowMap (three 0.187) must be replaced by PCFShadowMap'
+  );
+  assert.ok(
+    !/type\s*=\s*THREE\.PCFSoftShadowMap/.test(scene.source),
+    'no deprecated shadow filter assignment'
+  );
+});
+
+test('flat shading uses derivative normals instead of uploaded vertex normals', () => {
+  const scene = sceneSources().find((file) => file.name === 'scene.ts');
+  assert.ok(scene);
+  assert.ok(scene.source.includes('flatShading: true'));
+  assert.ok(
+    !scene.source.includes('computeVertexNormals'),
+    'building/terrain vertex normals are redundant with flatShading (saves ~10 MB VBO)'
+  );
+});
+
+test('the render loop is on-demand: dirty flag, hidden-tab guard and coalesced resize', () => {
+  const scene = sceneSources().find((file) => file.name === 'scene.ts');
+  assert.ok(scene);
+  // Render gating: a dirty flag plus camera-pose comparison, and no render
+  // while the tab is hidden.
+  assert.ok(scene.source.includes('needsRender'), 'render dirtiness flag');
+  assert.ok(scene.source.includes('cameraPoseChanged'), 'camera settle detection');
+  assert.ok(scene.source.includes('document.hidden'), 'hidden tabs must not render');
+  // Resize: observers only flag, the frame loop applies one coalesced resize.
+  assert.ok(scene.source.includes('scheduleResize'), 'coalesced resize path');
+  assert.ok(scene.source.includes('resizePending'), 'resize is deferred to rAF');
+  assert.ok(
+    (scene.source.match(/ResizeObserver\(/g) ?? []).length === 1,
+    'exactly one ResizeObserver'
+  );
+  // Debug/E2E counters: rolling median/p95 + lifetime frame count.
+  for (const field of [
+    'framesRendered',
+    'frameIntervalMedianMs',
+    'frameIntervalP95Ms',
+    'rendersPerSecond'
+  ]) {
+    assert.ok(scene.source.includes(field), `getDebug must expose render.${field}`);
+  }
+});
+
+test('quality tiers live in the pure quality module and drive renderer settings', () => {
+  const scene = sceneSources().find((file) => file.name === 'scene.ts');
+  const quality = sceneSources().find((file) => file.name === 'quality.ts');
+  assert.ok(scene && quality);
+  assert.ok(quality.source.includes("low: { dprCap: 1.25, shadowMapSize: 1024, showTrees: false }"));
+  assert.ok(quality.source.includes('qualityForEnvironment'), 'automatic phone/small-screen tier');
+  assert.ok(quality.source.includes('degradeQualityForFrameTime'), 'adaptive step-down policy');
+  assert.ok(scene.source.includes("from './quality.ts'"), 'scene consumes the pure tier module');
+});

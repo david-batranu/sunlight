@@ -24,6 +24,7 @@ import type {
   CityModel,
   CitySearchResponse,
   GenerationStep,
+  HealthCheck,
   JobStatus,
   ModelMeta,
   ModelTarget,
@@ -34,6 +35,7 @@ import { CityIndex } from './city-index.ts';
 import type {
   CityService,
   CityServiceHealth,
+  EnsureModelOptions,
   EnsureModelResult,
   ReadyModel,
   ResolvedTarget
@@ -45,7 +47,8 @@ import { log } from './logger.ts';
 import { fetchTerrain } from './elevation.ts';
 import { ModelCache, type CachedModel } from './model-cache.ts';
 import { gzipModel, modelEtag } from './model-io.ts';
-import type { RawOsmData } from './raw.ts';
+import { rawOsmElementCount, type RawOsmData } from './raw.ts';
+import { safeErrorMessage } from './redact.ts';
 import { createProviderChain, type ProviderChain } from './providers/chain.ts';
 import { SeedStore } from './seed-store.ts';
 import type { WorkerBuildRequest, WorkerResponse } from './worker-protocol.ts';
@@ -67,6 +70,13 @@ const RECENT_MODEL_LIMIT = 8;
 const RECENT_BYTES_LIMIT = 64 * 1024 * 1024;
 const GENERATION_TIMEOUT_MS = 240_000;
 const WORKER_BUILD_TIMEOUT_MS = 120_000;
+const MAX_TRACKED_FAILURES = 256;
+/**
+ * Upper bound on parsed OSM elements for one generation. Provider bodies are
+ * capped separately (96 MB); this protects the event loop from pathological
+ * dense targets that are valid JSON but expensive to parse/build.
+ */
+const DEFAULT_MAX_RAW_ELEMENTS = 500_000;
 
 interface BuildArtifact {
   gzipped: Buffer;
@@ -81,14 +91,27 @@ interface GenerationDeadline {
   clear(): void;
 }
 
-export function createCityService(config: AppConfig): CityService {
-  return new CityServiceImpl(config);
+/** Injection seams used by tests (and to override providers on constrained hosts). */
+export interface CityServiceOptions {
+  providerChain?: ProviderChain;
+  /** Terrain sampler override; tests inject one that fails to exercise degraded models. */
+  terrainFetcher?: typeof fetchTerrain;
+  /** Worker entry override. `null` forces in-process builds; `undefined` auto-locates. */
+  workerEntry?: string | null;
+  /** Override the parsed-element cap (tests use a tiny cap). */
+  maxRawElements?: number;
+}
+
+export function createCityService(config: AppConfig, options: CityServiceOptions = {}): CityService {
+  return new CityServiceImpl(config, options);
 }
 
 class CityServiceImpl implements CityService {
   private readonly config: AppConfig;
+  private readonly options: CityServiceOptions;
   private readonly radiusM: number;
   private readonly modelVersion: number;
+  private readonly failureCooldownMs: number;
 
   private index: CityIndex | null = null;
   private seeds: SeedStore | null = null;
@@ -101,14 +124,20 @@ class CityServiceImpl implements CityService {
   private shuttingDown = false;
   private workerEntry: string | null = null;
   private workerDisabled = false;
+  private workerFallbacks = 0;
+
+  /** Negative cache for recently failed model keys (avoids upstream retry storms). */
+  private readonly failures = new Map<string, { until: number; error: CityError }>();
 
   private readonly recentModels = new Map<string, ReadyModel>();
   private recentBytes = 0;
 
-  constructor(config: AppConfig) {
+  constructor(config: AppConfig, options: CityServiceOptions = {}) {
     this.config = config;
+    this.options = options;
     this.radiusM = Math.round(config.cityRadiusM);
     this.modelVersion = config.modelVersion;
+    this.failureCooldownMs = Math.max(0, config.failureCooldownSec) * 1000;
   }
 
   async init(): Promise<void> {
@@ -220,15 +249,19 @@ class CityServiceImpl implements CityService {
     throw new CityError('INVALID_TARGET', 'Target kind must be "city" or "point".', 400);
   }
 
-  async ensureModel(target: ModelTarget): Promise<EnsureModelResult> {
+  async ensureModel(target: ModelTarget, options: EnsureModelOptions = {}): Promise<EnsureModelResult> {
     this.ensureReady();
-    const resolved = this.resolve(target);
+    const resolved = options.resolved ?? this.resolve(target);
 
     const seed = await this.trySeed(resolved);
     if (seed) return seed;
 
     const cached = await this.tryCache(resolved.key);
     if (cached) return cached;
+
+    // A recent failure is surfaced immediately (no re-enqueue, no upstream hit).
+    const failure = this.recentFailure(resolved.key);
+    if (failure) throw failure;
 
     const existing = this.requireJobs().byKey(resolved.key);
     if (existing) return { state: 'queued', resolved, jobId: existing };
@@ -243,7 +276,11 @@ class CityServiceImpl implements CityService {
       );
     }
 
-    const { jobId } = this.requireJobs().enqueue(resolved.key, (context) => this.runGeneration(resolved, context));
+    const { jobId } = this.requireJobs().enqueue(
+      resolved.key,
+      (context) => this.runGeneration(resolved, context),
+      { ...(options.clientId ? { clientId: options.clientId } : {}) }
+    );
     return { state: 'queued', resolved, jobId };
   }
 
@@ -283,6 +320,7 @@ class CityServiceImpl implements CityService {
   }
 
   health(): CityServiceHealth {
+    const cacheInitialised = this.cache !== null;
     const cache = this.cache
       ? { models: this.cache.models, bytes: this.cache.bytes, maxBytes: this.cache.maxBytesLimit }
       : { models: 0, bytes: 0, maxBytes: Math.max(0, this.config.cacheMaxBytes) };
@@ -297,11 +335,67 @@ class CityServiceImpl implements CityService {
     };
     if (this.chain) Object.assign(providers, this.chain.statuses());
     if (this.seeds) providers.seed = this.seeds.statusValue;
+
+    const seedCount = this.seeds?.count ?? 0;
+    const seedsDown = this.seeds !== null && this.seeds?.statusValue === 'down';
+    const degradedSeeds = this.seeds?.degradedSlugs ?? [];
+    const generationAvailable = this.chain?.canGenerate === true;
+    const generationOk = generationAvailable || seedCount > 0;
+
+    const checks: HealthCheck[] = [
+      {
+        name: 'cache',
+        ok: this.initialized && cacheInitialised,
+        detail: !cacheInitialised
+          ? 'not initialised'
+          : this.cache?.cacheEnabled
+            ? `${cache.models} model(s), ${cache.bytes} B`
+            : 'disabled (CACHE_MAX_MB=0)'
+      },
+      {
+        name: 'seeds',
+        ok: !seedsDown && degradedSeeds.length === 0,
+        detail: seedsDown
+          ? 'seed manifest incompatible or unreadable'
+          : degradedSeeds.length > 0
+            ? `${degradedSeeds.length} degraded seed(s): ${degradedSeeds.slice(0, 5).join(', ')}`
+            : `${seedCount} seed(s) verified`
+      },
+      {
+        name: 'generation',
+        ok: generationOk,
+        detail: generationAvailable
+          ? 'live generation enabled'
+          : seedCount > 0
+            ? 'seeds only (live generation disabled)'
+            : 'no generation source available'
+      },
+      {
+        name: 'worker',
+        ok: !this.workerDisabled,
+        detail: !this.workerEntry
+          ? 'in-process builds (no worker entry)'
+          : this.workerDisabled
+            ? 'in-process fallback active after a worker failure'
+            : 'threaded builds'
+      },
+      { name: 'queue', ok: true, detail: `${queue.active} active, ${queue.queued} queued` }
+    ];
+    const ready = this.initialized && cacheInitialised && generationOk;
+    const degraded = checks.some((check) => !check.ok);
     return {
       cache,
       queue,
       providers,
-      seeds: this.seeds ? { count: this.seeds.count, slugs: this.seeds.slugs } : { count: 0, slugs: [] }
+      seeds: this.seeds ? { count: this.seeds.count, slugs: this.seeds.slugs } : { count: 0, slugs: [] },
+      ready,
+      degraded,
+      checks,
+      worker: {
+        enabled: this.workerEntry !== null && !this.workerDisabled,
+        disabled: this.workerDisabled,
+        fallbacks: this.workerFallbacks
+      }
     };
   }
 
@@ -314,8 +408,10 @@ class CityServiceImpl implements CityService {
       this.chain?.shutdown();
       this.recentModels.clear();
       this.recentBytes = 0;
+      this.failures.clear();
       this.initialized = false;
       this.workerDisabled = false;
+      this.workerFallbacks = 0;
     }
   }
 
@@ -333,20 +429,27 @@ class CityServiceImpl implements CityService {
     this.index = index;
     this.seeds = seeds;
 
-    const cache = new ModelCache(this.config.cacheDir, this.config.cacheMaxBytes);
+    const cache = new ModelCache(this.config.cacheDir, this.config.cacheMaxBytes, {
+      modelVersion: this.modelVersion,
+      radiusM: this.radiusM
+    });
     await cache.init();
     this.cache = cache;
 
-    this.chain = createProviderChain(this.config);
+    this.chain = this.options.providerChain ?? createProviderChain(this.config);
     this.jobs = new JobQueue({
       concurrency: this.config.generationConcurrency,
+      maxQueued: this.config.jobQueueMax,
+      maxPerClient: this.config.jobPerClientMax,
+      maxQueuedAgeMs: this.config.queueMaxAgeSec * 1000,
       onRunnerError: (error, jobId) => {
         log.warn(
           `generation job ${jobId} failed: ${error instanceof Error ? error.message : String(error)}`
         );
       }
     });
-    this.workerEntry = locateWorkerEntry();
+    this.workerEntry =
+      this.options.workerEntry !== undefined ? this.options.workerEntry : locateWorkerEntry();
     if (!this.workerEntry) {
       log.warn('generation worker entry (worker.ts/worker.js) was not found; using in-process generation');
     }
@@ -382,12 +485,25 @@ class CityServiceImpl implements CityService {
         }
       });
 
+      const elementCount = rawOsmElementCount(raw);
+      const maxElements = this.options.maxRawElements ?? DEFAULT_MAX_RAW_ELEMENTS;
+      if (elementCount > maxElements) {
+        throw new CityError(
+          'TARGET_TOO_DENSE',
+          `The requested area contains ${elementCount} OpenStreetMap elements, above the ${maxElements} element limit. Choose a smaller or less dense area.`,
+          422,
+          false,
+          { elements: elementCount, limit: maxElements }
+        );
+      }
+
       const warnings = [...raw.warnings];
+      const degradedReasons: string[] = [];
       let terrain = null;
       if (raw.source !== 'fixture') {
         context.report('fetch', 58, 'Sampling elevation');
         try {
-          terrain = await fetchTerrain({
+          terrain = await this.fetchTerrain({
             centerLat: center.lat,
             centerLon: center.lon,
             radiusM: this.radiusM,
@@ -395,10 +511,18 @@ class CityServiceImpl implements CityService {
           });
         } catch (error) {
           if (isAbortError(error) || deadline.signal.aborted) throw error;
-          const message = error instanceof Error ? error.message : String(error);
+          const message = safeErrorMessage(error, 'terrain provider unavailable');
           warnings.push(`terrain unavailable: ${message}`);
+          degradedReasons.push('terrain unavailable');
           log.warn(`terrain unavailable for ${resolved.key}: ${message}`);
         }
+      }
+      if (raw.partial) {
+        degradedReasons.push('partial upstream coverage');
+        log.warn(`provider coverage was partial for ${resolved.key}; marking the model degraded`);
+      }
+      if (degradedReasons.length > 0) {
+        warnings.push(`degraded model: ${degradedReasons.join('; ')}`);
       }
 
       context.report('build', 62, 'Generating city model', `${raw.ways.length} ways`);
@@ -413,12 +537,15 @@ class CityServiceImpl implements CityService {
         seed: false,
         generatedAt: new Date().toISOString(),
         warnings,
-        terrain
+        terrain,
+        degraded: degradedReasons.length > 0,
+        degradedReasons
       };
 
       const artifact = await this.buildModel(raw, input, context, deadline.signal);
 
       context.report('write', 96, 'Writing model cache');
+      this.failures.delete(resolved.key);
       await this.requireCache().write(resolved.key, artifact.gzipped, {
         meta: artifact.meta,
         city: resolved.city,
@@ -438,18 +565,26 @@ class CityServiceImpl implements CityService {
       context.report('write', 99, 'Model cached');
     } catch (error) {
       if (deadline.timedOut) {
-        throw new CityError(
+        const timeoutError = new CityError(
           'MODEL_TIMEOUT',
           `City generation timed out after ${Math.round(GENERATION_TIMEOUT_MS / 1000)} s.`,
           502,
           true,
           { key: resolved.key }
         );
+        this.recordFailure(resolved.key, timeoutError);
+        throw timeoutError;
       }
+      this.recordFailure(resolved.key, error);
       throw error;
     } finally {
       deadline.clear();
     }
+  }
+
+  /** Terrain sampler behind an injection seam (tests use a failing fake). */
+  private fetchTerrain(options: Parameters<typeof fetchTerrain>[0]): ReturnType<typeof fetchTerrain> {
+    return (this.options.terrainFetcher ?? fetchTerrain)(options);
   }
 
   private async buildModel(
@@ -463,12 +598,22 @@ class CityServiceImpl implements CityService {
         return await this.buildInWorker(this.workerEntry, raw, input, context, signal);
       } catch (error) {
         if (isAbortError(error)) throw error;
-        if (error instanceof CityError && error.code === 'WORKER_START_FAILED') {
-          log.warn(`generation worker could not start (${error.message}); using in-process generation`);
-          this.workerDisabled = true;
-        } else {
-          throw error;
-        }
+        // Only *boot/crash* failures fall back: a build error reported by the
+        // worker itself (NO_DATA, MODEL_FAILED, ...) is a normal job failure.
+        const fallbackable =
+          error instanceof CityError &&
+          (error.code === 'WORKER_START_FAILED' ||
+            error.code === 'WORKER_BOOT_FAILED' ||
+            error.code === 'WORKER_CRASHED');
+        if (!fallbackable) throw error;
+        // Fall back at most once per process: disable the worker so later jobs
+        // do not retry the broken entry point in a loop.
+        this.workerDisabled = true;
+        this.workerFallbacks += 1;
+        log.warn(
+          `generation worker failed (${error.code}: ${error.message}); ` +
+            'falling back to in-process generation and disabling the worker'
+        );
       }
     }
     return this.buildInProcess(raw, input, context, signal);
@@ -483,6 +628,7 @@ class CityServiceImpl implements CityService {
   ): Promise<BuildArtifact> {
     return new Promise<BuildArtifact>((resolve, reject) => {
       let settled = false;
+      let receivedMessage = false;
       let worker: Worker;
       try {
         const workerData: WorkerBuildRequest = { type: 'build', raw, input };
@@ -532,10 +678,12 @@ class CityServiceImpl implements CityService {
 
       worker.on('message', (message: WorkerResponse) => {
         if (settled) return;
+        receivedMessage = true;
         if (message.type === 'progress') {
           const local = Math.max(0, Math.min(100, message.percent));
           context.report('build', 62 + Math.round((local / 100) * 32), message.label, message.detail);
         } else if (message.type === 'done') {
+          log.info(`worker build finished in ${message.elapsedMs} ms (${message.bytes} B gzipped)`);
           succeed({
             gzipped: Buffer.from(message.gzipped),
             etag: message.etag,
@@ -555,18 +703,34 @@ class CityServiceImpl implements CityService {
         }
       });
       worker.on('error', (error) => {
+        // An `error` before any message means the script failed to evaluate:
+        // the entry point is broken and the service falls back in-process.
+        const code = receivedMessage ? 'WORKER_CRASHED' : 'WORKER_BOOT_FAILED';
         fail(
           new CityError(
-            'WORKER_FAILED',
-            `The generation worker crashed: ${error instanceof Error ? error.message : String(error)}`,
+            code,
+            `The generation worker ${receivedMessage ? 'crashed' : 'failed to start'}: ${safeErrorMessage(error, 'worker error')}`,
             502,
             true
           )
         );
       });
-      worker.on('exit', (code) => {
+      worker.on('exit', (exitCode) => {
         if (settled) return;
-        fail(new CityError('WORKER_FAILED', `The generation worker exited unexpectedly (code ${code}).`, 502, true));
+        if (!receivedMessage) {
+          fail(
+            new CityError(
+              'WORKER_BOOT_FAILED',
+              `The generation worker exited during startup (code ${exitCode}).`,
+              502,
+              true
+            )
+          );
+          return;
+        }
+        fail(
+          new CityError('WORKER_CRASHED', `The generation worker exited unexpectedly (code ${exitCode}).`, 502, true)
+        );
       });
     });
   }
@@ -589,6 +753,46 @@ class CityServiceImpl implements CityService {
     }
     const gzipped = await gzipModel(model);
     return { gzipped, etag: modelEtag(gzipped), bytes: gzipped.length, meta: model.meta };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Negative cache                                                    */
+  /* ---------------------------------------------------------------- */
+
+  /** Returns a still-cooling-down failure for a key, or null when retryable. */
+  private recentFailure(key: string): CityError | null {
+    const entry = this.failures.get(key);
+    if (!entry) return null;
+    const now = Date.now();
+    if (entry.until <= now) {
+      this.failures.delete(key);
+      return null;
+    }
+    const retryAfterSec = Math.max(1, Math.ceil((entry.until - now) / 1000));
+    return new CityError(
+      entry.error.code,
+      entry.error.retryable
+        ? `${entry.error.message} Recent attempts failed; retry in ${retryAfterSec} s.`
+        : entry.error.message,
+      entry.error.status,
+      entry.error.retryable,
+      entry.error.details,
+      retryAfterSec
+    );
+  }
+
+  private recordFailure(key: string, error: unknown): void {
+    if (this.failureCooldownMs <= 0 || isAbortError(error)) return;
+    const cityError = isCityError(error)
+      ? error
+      : new CityError('MODEL_FAILED', safeErrorMessage(error), 502, true);
+    this.failures.set(key, { until: Date.now() + this.failureCooldownMs, error: cityError });
+    if (this.failures.size > MAX_TRACKED_FAILURES) {
+      const now = Date.now();
+      for (const [failureKey, entry] of this.failures) {
+        if (entry.until <= now || this.failures.size > MAX_TRACKED_FAILURES) this.failures.delete(failureKey);
+      }
+    }
   }
 
   /* ---------------------------------------------------------------- */

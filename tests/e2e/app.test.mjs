@@ -438,6 +438,17 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
     const openedZoom = await page.evaluate(() => window.__sunlight.getSceneDebug().camera.zoom);
     assert.equal(openedZoom, 1, 'opening the area picker should keep the wide context view');
 
+    // Focus at the default 750m window must zoom in, not out (UX P1-5).
+    await page.locator('[data-testid="detail-focus"]').click();
+    await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom > 1, null, {
+      timeout: 5000
+    });
+    // Return to the wide view for the resize/Focus sequence.
+    await page.locator('[data-testid="reset-camera"]').click();
+    await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom === 1, null, {
+      timeout: 5000
+    });
+
     // Resizing only changes the window; Focus explicitly moves the camera.
     await page.locator('[data-testid="detail-size-input"]').evaluate((input) => {
       input.value = '300';
@@ -474,6 +485,151 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === false);
     assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), false);
+  });
+});
+
+test('Space activates focused controls instead of toggling playback', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+    const area = page.locator('[data-testid="area-pick"]');
+    await area.focus();
+    const before = await readState(page);
+    assert.equal(before.playing, false);
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true, null, {
+      timeout: 3000
+    });
+    const after = await readState(page);
+    assert.equal(after.playing, false, 'Space on a focused button must not toggle playback');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === false, null, {
+      timeout: 3000
+    });
+    assert.equal(await area.evaluate((el) => el === document.activeElement), true, 'focus should return to Area');
+    // Space on the non-interactive page still toggles playback.
+    await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => window.__sunlight.getState().playing === true, null, {
+      timeout: 3000
+    });
+  });
+});
+
+test('Today preserves the time-of-day; Now restores both date and time', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-20&time=10:15');
+    const todayCity = await page.evaluate(() =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bucharest' }).format(new Date())
+    );
+    await page.locator('[data-testid="today"]').click();
+    await page.waitForFunction((date) => window.__sunlight.getState().date === date, todayCity);
+    const afterToday = await readState(page);
+    assert.equal(Math.floor(afterToday.minute ?? -1), 615, 'Today must preserve the current time-of-day');
+    await page.locator('[data-testid="set-now"]').click();
+    await page.waitForTimeout(300);
+    const afterNow = await readState(page);
+    const now = await page.evaluate(() => {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Bucharest', hour: '2-digit', minute: '2-digit', hour12: false
+      }).formatToParts(new Date());
+      const get = (type) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+      return { date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Bucharest' }).format(new Date()), minute: get('hour') * 60 + get('minute') };
+    });
+    assert.equal(afterNow.date, now.date);
+    assert.ok(Math.abs((afterNow.minute ?? 0) - now.minute) < 3, 'Now must restore the current minute');
+  });
+});
+
+test('Area picker reflows to a sheet at 200% zoom and small phones without clipping', async () => {
+  await withPage(async ({ page }) => {
+    await page.setViewportSize({ width: 720, height: 450 });
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+    await page.locator('[data-testid="area-pick"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
+    const zoomed = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="detail-panel"]').getBoundingClientRect();
+      const map = document.querySelector('.sl-minimap-map').getBoundingClientRect();
+      const canvas = document.querySelector('[data-testid="detail-canvas"]').getBoundingClientRect();
+      const focus = document.querySelector('[data-testid="detail-focus"]').getBoundingClientRect();
+      const load = document.querySelector('[data-testid="detail-load"]').getBoundingClientRect();
+      const inside = (r) => r.left >= -1 && r.top >= -1 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1;
+      return {
+        mode: document.querySelector('[data-testid="detail-panel"]').dataset.mode,
+        inside: inside(panel) && inside(map) && inside(focus) && inside(load),
+        map: [Math.round(map.width), Math.round(map.height)],
+        canvas: [Math.round(canvas.width), Math.round(canvas.height)]
+      };
+    });
+    assert.equal(zoomed.mode, 'sheet');
+    assert.equal(zoomed.inside, true, 'Area sheet, map and actions must fit the 200% viewport');
+    assert.ok(Math.abs(zoomed.map[0] - zoomed.map[1]) <= 2, 'map must not be clipped vertically');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === false);
+
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.waitForTimeout(400);
+    await page.locator('[data-testid="area-pick"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
+    const phone = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="detail-panel"]').getBoundingClientRect();
+      const map = document.querySelector('.sl-minimap-map').getBoundingClientRect();
+      const canvas = document.querySelector('[data-testid="detail-canvas"]').getBoundingClientRect();
+      return {
+        inside: panel.top >= -1 && panel.bottom <= window.innerHeight + 1,
+        canvas: [Math.round(canvas.width), Math.round(canvas.height)],
+        map: [Math.round(map.width), Math.round(map.height)]
+      };
+    });
+    assert.equal(phone.inside, true);
+    assert.equal(phone.canvas[0], phone.canvas[1], 'phone map canvas must stay 1:1');
+    assert.ok(phone.map[1] >= phone.canvas[1] - 2, 'phone map must not clip the canvas');
+  });
+});
+
+test('overview map zooms and keyboard navigation works on the diorama', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+    await page.locator('[data-testid="area-pick"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
+    const scale0 = await page.locator('[data-testid="detail-map-scale"]').innerText();
+    await page.locator('[data-testid="detail-map-zoom-in"]').click();
+    await page.locator('[data-testid="detail-map-zoom-in"]').click();
+    await page.waitForTimeout(400);
+    const scale1 = await page.locator('[data-testid="detail-map-scale"]').innerText();
+    assert.notEqual(scale1, scale0, 'map zoom must change the scale label');
+    assert.match(scale1, /radius/);
+    await page.keyboard.press('Escape');
+
+    const before = await page.evaluate(() => window.__sunlight.getSceneDebug().camera);
+    await page.locator('#scene').focus();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('+');
+    await page.waitForTimeout(500);
+    const after = await page.evaluate(() => window.__sunlight.getSceneDebug().camera);
+    assert.notDeepEqual(after.target, before.target, 'arrow keys must pan the diorama');
+    assert.ok(after.zoom > before.zoom, 'plus must zoom the diorama');
+  });
+});
+
+test('named places list is an accessible alternative to map tooltips', async () => {
+  await withPage(async ({ page }) => {
+    await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
+    const toggle = page.locator('[data-testid="named-toggle"]');
+    if (!(await toggle.isVisible())) {
+      await page.locator('[data-testid="light-collapse"]').click();
+      await page.waitForTimeout(200);
+    }
+    await toggle.waitFor({ state: 'visible' });
+    await toggle.click();
+    await page.waitForFunction(() => {
+      const list = document.querySelector('[data-testid="named-list"]');
+      return list && list.children.length > 0;
+    });
+    const items = await page.locator('[data-testid="named-list"] li').count();
+    assert.ok(items > 10, `expected named places in the list, got ${items}`);
+    await page.locator('[data-testid="named-filter"]').fill('Bulevardul');
+    await page.waitForTimeout(150);
+    assert.ok((await page.locator('[data-testid="named-list"] li').count()) < items);
   });
 });
 

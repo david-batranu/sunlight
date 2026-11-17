@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import type { CityModel } from '../../shared/types.ts';
 import {
   CAMERA_DISTANCE_M,
+  DETAIL_MODEL_HEIGHT_FRACTION,
   DEFAULT_AZIMUTH_DEG,
   DEFAULT_PITCH_DEG,
   FIT_AZIMUTH_DEG,
@@ -25,7 +26,9 @@ import {
   clampZoom,
   dampingAlpha,
   defaultPose,
+  detailFocusZoom,
   dragToPan,
+  fitBoxFor,
   fitHalfHeight,
   fitTargetY,
   orthoFrustum,
@@ -239,4 +242,73 @@ test('dampingAlpha is framerate independent and bounded', () => {
   const long = dampingAlpha(12, 1 / 30);
   assert.ok(short > 0 && short < long && long <= 1);
   close(dampingAlpha(5, 0.2), 1 - Math.exp(-1), 1e-9);
+});
+
+/* ------------------------------------------------------------------ */
+/* Detail-window focus math                                            */
+/* ------------------------------------------------------------------ */
+
+test('detailFocusZoom never zooms out below the model-fit view', () => {
+  const extents = defaultExtents();
+  const profile = plinthProfile(extents);
+  const fitBox = fitBoxFor(extents, profile.outerHalfX, profile.outerHalfZ, profile.bottomY);
+  const halfHeight = fitHalfHeight(fitBox, 16 / 9);
+
+  // The reported UX bug: at the default 750 m window Focus used to zoom *out*
+  // (measured 1.00 → 0.972). Reconstruct the old formula to prove it zoomed
+  // out, then check the new one frames the window without going below fit.
+  const fittedHeight = halfHeight * 2;
+  const oldDesiredHeight = Math.min(
+    Math.max(360, 750 * 2 * 2.4),
+    extents.radius * 2 * 1.05
+  );
+  const oldZoom = fittedHeight / oldDesiredHeight;
+  assert.ok(oldZoom < 1, `old formula should reproduce the zoom-out (${oldZoom})`);
+  const defaultWindowZoom = detailFocusZoom(halfHeight, extents.radius, 750);
+  assert.ok(defaultWindowZoom >= 1, `default window zoom ${defaultWindowZoom} must be >= 1`);
+  assert.ok(
+    defaultWindowZoom > oldZoom,
+    `new zoom ${defaultWindowZoom} must beat the old ${oldZoom}`
+  );
+
+  // A small window zooms in and stays within the public zoom limits.
+  const smallZoom = detailFocusZoom(halfHeight, extents.radius, 100);
+  assert.ok(smallZoom > defaultWindowZoom, `100 m window should zoom in (${smallZoom})`);
+  assert.ok(smallZoom <= ZOOM_MAX);
+
+  // A window larger than the model is capped at the model-height fraction and
+  // falls back toward the fitted view instead of showing empty space.
+  const cappedZoom = Math.max(
+    1,
+    fittedHeight / (extents.radius * 2 * DETAIL_MODEL_HEIGHT_FRACTION)
+  );
+  close(
+    detailFocusZoom(halfHeight, extents.radius, extents.radius * 2),
+    cappedZoom,
+    1e-9,
+    'oversized window clamps to the model-cap zoom'
+  );
+
+  // Monotone in window radius and always inside [1, ZOOM_MAX].
+  let previous = Infinity;
+  for (const radius of [1, 10, 100, 250, 500, 750, 1000, 1500, 3000, 10000]) {
+    const zoom = detailFocusZoom(halfHeight, extents.radius, radius);
+    assert.ok(zoom >= 1 && zoom <= ZOOM_MAX, `zoom(${radius}) = ${zoom} outside [1, ${ZOOM_MAX}]`);
+    assert.ok(zoom <= previous + 1e-12, `zoom must not grow with a larger window (${radius})`);
+    previous = zoom;
+  }
+});
+
+test('detailFocusZoom handles degenerate inputs without NaN/infinity', () => {
+  assert.equal(detailFocusZoom(0, 1500, 750), DEFAULT_ZOOM);
+  assert.equal(detailFocusZoom(Number.NaN, 1500, 750), DEFAULT_ZOOM);
+  assert.equal(detailFocusZoom(1000, 1500, 0), ZOOM_MAX, 'point window clamps to max zoom');
+  assert.equal(detailFocusZoom(1000, Number.NaN, 750), ZOOM_MAX, 'missing model radius');
+  for (const zoom of [
+    detailFocusZoom(-5, 1500, 750),
+    detailFocusZoom(1000, -10, 750),
+    detailFocusZoom(1000, 1500, -100)
+  ]) {
+    assert.ok(Number.isFinite(zoom) && zoom >= 1 && zoom <= ZOOM_MAX);
+  }
 });

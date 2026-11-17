@@ -181,6 +181,54 @@ export function fitTargetY(extents: ModelExtents, bottomY: number): number {
   return (extents.maxY + bottomY) * 0.5;
 }
 
+/* ------------------------------------------------------------------ */
+/* Detail-window focus                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Context shown around a focused detail window: the view is
+ * `DETAIL_CONTEXT_FACTOR ×` the window's diameter tall, so the selection plus
+ * a ring of surrounding model stays visible.
+ */
+export const DETAIL_CONTEXT_FACTOR = 1.8;
+/**
+ * A focused view is capped at this fraction of the model diameter. It prevents
+ * "Focus" on a huge window from pulling the camera out to empty space.
+ */
+export const DETAIL_MODEL_HEIGHT_FRACTION = 0.95;
+
+/**
+ * Zoom that frames a detail window with context.
+ *
+ * `fitHalfHeightWorld` is the world half-height of the fitted view at zoom 1
+ * (see {@link fitHalfHeight}), so the fitted model view is `2×` that tall.
+ *
+ * The target view height is the smaller of the window's diameter × context
+ * factor and {@link DETAIL_MODEL_HEIGHT_FRACTION} of the model diameter. The
+ * result is always at least zoom 1 — focusing a window that is already visible
+ * in (or larger than) the model-fit view must never zoom *out* and expose the
+ * empty space around the diorama.
+ */
+export function detailFocusZoom(
+  fitHalfHeightWorld: number,
+  modelRadiusM: number,
+  windowRadiusM: number
+): number {
+  const fittedHeight = fitHalfHeightWorld > 0 && Number.isFinite(fitHalfHeightWorld)
+    ? fitHalfHeightWorld * 2
+    : 0;
+  if (!(fittedHeight > 0)) return DEFAULT_ZOOM;
+  const windowHeight =
+    (Number.isFinite(windowRadiusM) ? Math.max(0, windowRadiusM) : 0) * 2 * DETAIL_CONTEXT_FACTOR;
+  const modelHeight =
+    (Number.isFinite(modelRadiusM) ? Math.max(1, modelRadiusM) : 1) *
+    2 *
+    DETAIL_MODEL_HEIGHT_FRACTION;
+  const desiredHeight = Math.min(windowHeight, modelHeight);
+  if (!(desiredHeight > 0)) return ZOOM_MAX;
+  return Math.max(DEFAULT_ZOOM, Math.min(ZOOM_MAX, fittedHeight / desiredHeight));
+}
+
 export interface PanBounds {
   centerX: number;
   centerZ: number;

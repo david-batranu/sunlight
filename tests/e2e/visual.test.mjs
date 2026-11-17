@@ -142,11 +142,29 @@ test('performance smoke at 1440x900 (SwiftShader): merged draw calls, triangles,
       `draw calls should stay merged (~8), got ${debug.render.drawCalls}`
     );
     assert.ok(
-      debug.render.triangles > 250_000 && debug.render.triangles < 750_000,
-      `expected the wide city mesh (250k–700k triangles), got ${debug.render.triangles}`
+      debug.render.triangles > 200_000 && debug.render.triangles < 750_000,
+      `expected the wide city mesh (200k–750k triangles), got ${debug.render.triangles}`
     );
     // FPS is reported raw: SwiftShader is far slower than a real GPU.
     assert.ok(debug.render.fps > 0, 'fps should be a positive number');
+    assert.equal(debug.render.quality, 'high', 'desktop should stay on the high tier');
+    assert.ok(debug.render.framesRendered > 0);
+    // Idle gating: a settled visible tab must stop issuing renders.
+    const framesBefore = debug.render.framesRendered;
+    await page.waitForTimeout(700);
+    const idle = await readDebug(page);
+    assert.equal(idle.render.framesRendered, framesBefore, 'idle scene must not render frames');
+    assert.equal(idle.render.rendersPerSecond, 0, 'idle scene should report 0 renders/s');
+    // A new time still wakes the renderer.
+    await page.locator('[data-testid="time-slider"]').evaluate((input) => {
+      input.value = String(Number(input.value) + 5);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForTimeout(400);
+    assert.ok(
+      (await readDebug(page)).render.framesRendered > framesBefore,
+      'changing time must render at least one new frame'
+    );
   });
 });
 

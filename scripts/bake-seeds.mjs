@@ -47,6 +47,18 @@ const MANIFEST_FORMAT = 1;
 const MANIFEST_FILE = 'manifest.json';
 const PER_CITY_TIMEOUT_MS = 300_000;
 const VALID_SOURCES = new Set(['auto', 'overpass', 'osm-api', 'fixture']);
+/**
+ * Warnings that mean a bake used incomplete upstream coverage. Such a seed is
+ * not "up to date": the next bake run retries it instead of keeping a partial
+ * model forever behind `--force`.
+ */
+const PARTIAL_COVERAGE_RE = /tile budget|not fetched|part of the area|could not be split/i;
+
+/** True when a model's warnings indicate partial upstream coverage. */
+function hasPartialCoverageWarning(model) {
+  const warnings = Array.isArray(model?.meta?.warnings) ? model.meta.warnings : [];
+  return warnings.some((warning) => typeof warning === 'string' && PARTIAL_COVERAGE_RE.test(warning));
+}
 
 function usage() {
   const lines = [
@@ -149,20 +161,34 @@ async function readPreviousManifest(outDir) {
   }
 }
 
-/** True when the existing seed file matches its manifest entry and this model version. */
+/**
+ * True when the existing seed file matches its manifest entry, this model
+ * version and the quality gate.
+ *
+ * Integrity alone is not enough: a seed baked while the terrain provider was
+ * down (or from partial OSM coverage) is structurally valid but should be
+ * refreshed on the next normal bake. Fixture bakes intentionally have no
+ * terrain, so `entry.source === 'fixture'` is exempt from the terrain check.
+ */
 async function existingSeedIsValid(outDir, entry, modelVersion, radiusM) {
   if (!entry || typeof entry !== 'object') return false;
   if (entry.modelVersion !== modelVersion || entry.radiusM !== radiusM) return false;
   if (typeof entry.file !== 'string' || typeof entry.sha256 !== 'string' || !Number.isSafeInteger(entry.bytes)) {
     return false;
   }
+  if (entry.degraded === true) return false;
   if (!existsSync(path.join(outDir, entry.file))) return false;
   try {
     const buffer = await readFile(path.join(outDir, entry.file));
     if (buffer.length !== entry.bytes) return false;
     if (sha256Hex(buffer) !== entry.sha256) return false;
     const model = JSON.parse(gunzipSync(buffer).toString('utf8'));
-    return model.v === modelVersion && model.key === entry.key && model.meta?.seed === true;
+    if (model.v !== modelVersion || model.key !== entry.key || model.meta?.seed !== true) return false;
+    // Quality gate: degraded / terrain-less / partial-coverage seeds are stale.
+    if (model.meta?.degraded === true) return false;
+    if (hasPartialCoverageWarning(model)) return false;
+    if (entry.source !== 'fixture' && !model.terrain) return false;
+    return true;
   } catch {
     return false;
   }
@@ -204,6 +230,7 @@ async function bakeCity(city, context) {
 
     let terrain = null;
     const warnings = [...raw.warnings];
+    const degradedReasons = [];
     try {
       console.log('  sampling elevation (AWS Terrain Tiles) ...');
       terrain = await fetchTerrain({
@@ -219,7 +246,15 @@ async function bakeCity(city, context) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       warnings.push(`terrain unavailable: ${message}`);
-      console.warn(`    WARNING: terrain unavailable (${message}); baking a flat model`);
+      degradedReasons.push('terrain unavailable');
+      console.warn(`    WARNING: terrain unavailable (${message}); baking a flat, degraded model`);
+    }
+    if (raw.partial) {
+      degradedReasons.push('partial upstream coverage');
+      console.warn('    WARNING: upstream coverage was partial; baking a degraded model');
+    }
+    if (degradedReasons.length > 0) {
+      warnings.push(`degraded model: ${degradedReasons.join('; ')}`);
     }
 
     const model = buildCityModel(raw, {
@@ -241,11 +276,15 @@ async function bakeCity(city, context) {
       generatedAt,
       attribution: OSM_ATTRIBUTION,
       warnings,
-      terrain
+      terrain,
+      degraded: degradedReasons.length > 0,
+      degradedReasons
     });
 
     const json = Buffer.from(JSON.stringify(model), 'utf8');
-    const gzipped = gzipSync(json, { level: 9 });
+    // Level 6 is ~2.5x faster than level 9 for ~1% larger seeds; bake time is
+    // dominated by the network fetch, but the runtime worker uses the same level.
+    const gzipped = gzipSync(json, { level: 6 });
     // Self-check: the manifest digest must describe exactly what is written.
     const decoded = JSON.parse(gunzipSync(gzipped).toString('utf8'));
     if (decoded.key !== key || decoded.v !== modelVersion || decoded.meta?.seed !== true) {
@@ -268,7 +307,8 @@ async function bakeCity(city, context) {
       radiusM,
       source: raw.source,
       generatedAt,
-      stats: model.meta.stats
+      stats: model.meta.stats,
+      ...(model.meta.degraded ? { degraded: true } : {})
     };
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
     console.log(
@@ -277,6 +317,12 @@ async function bakeCity(city, context) {
     );
     if (model.meta.warnings.length > 0) {
       console.log(`    warnings: ${model.meta.warnings.join(' | ')}`);
+    }
+    if (model.meta.degraded) {
+      console.warn(
+        `    WARNING: ${city.slug} was baked as a degraded model (${(model.meta.degradedReasons ?? []).join('; ')}); ` +
+          'the next bake run will retry it'
+      );
     }
     return { entry, raw };
   } finally {

@@ -100,7 +100,11 @@ async function main() {
       CACHE_DIR: CACHE,
       CITY_SOURCE: process.env.E2E_CITY_SOURCE || 'seed',
       SEEDS_ONLY: process.env.E2E_SEEDS_ONLY || '1',
-      RATE_LIMIT_PER_MIN: '0'
+      RATE_LIMIT_PER_MIN: '0',
+      // E2E drives one browser from a single loopback address for many page
+      // loads; disable the per-client read/sky limits for the test server.
+      READ_RATE_LIMIT_PER_MIN: '0',
+      SKY_RATE_LIMIT_PER_MIN: '0'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

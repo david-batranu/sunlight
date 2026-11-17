@@ -5,7 +5,7 @@
 import type { AppState } from '../app/state.ts';
 import type { UIContext } from '../app/contracts.ts';
 import { countryName, formatCount, sourceLabel } from './format.ts';
-import { createPatcher, el, on, q } from './dom.ts';
+import { createPatcher, el, focusEl, on, q } from './dom.ts';
 import { icon } from './icons.ts';
 
 export interface TopBarCallbacks {
@@ -17,6 +17,8 @@ export interface TopBarHandle {
   element: HTMLElement;
   update(state: AppState): void;
   setSearchOpen(open: boolean): void;
+  /** Returns focus to the Area toggle after its panel closes. */
+  focusAreaButton(): void;
   destroy(): void;
 }
 
@@ -120,6 +122,13 @@ export function createTopBar(ctx: UIContext, callbacks: TopBarCallbacks): TopBar
       'aria-label',
       state.detailPanelOpen ? 'Close area picker' : 'Open area picker'
     );
+    patcher.attr(
+      areaPickButton,
+      'title',
+      state.detailPanelOpen
+        ? 'Close the area picker (Esc)'
+        : 'Choose a 1.5–3 km area: focus the camera or rebuild the city there'
+    );
   }
 
   return {
@@ -128,6 +137,9 @@ export function createTopBar(ctx: UIContext, callbacks: TopBarCallbacks): TopBar
     setSearchOpen(open: boolean): void {
       patcher.attr(cityChip, 'aria-expanded', open ? 'true' : 'false');
       patcher.attr(openSearch, 'aria-expanded', open ? 'true' : 'false');
+    },
+    focusAreaButton(): void {
+      focusEl(areaPickButton);
     },
     destroy(): void {
       cleanup.forEach((dispose) => dispose());

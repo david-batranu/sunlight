@@ -1,6 +1,12 @@
 /**
  * Keyboard shortcut matching, kept pure so the map can be unit-tested and the
  * About dialog can render the same table the handler uses.
+ *
+ * Global shortcuts are deliberately suppressed whenever a button, link or
+ * form control has focus: Space and Enter must keep their native activation
+ * behaviour on controls, and arrow keys must keep adjusting sliders. Escape is
+ * the exception — it is never swallowed by the focus guard so it can always
+ * close the active panel/dialog, even from inside a text field.
  */
 
 export type ShortcutAction =
@@ -35,7 +41,7 @@ export interface ShortcutDefinition {
 
 /** Table shown in the About dialog. Kept in the same order as the handler. */
 export const SHORTCUT_TABLE: readonly ShortcutDefinition[] = [
-  { id: 'toggle-play', keys: 'Space', label: 'Play / pause the day' },
+  { id: 'toggle-play', keys: 'Space', label: 'Play / pause the day (when the page, not a control, has focus)' },
   { id: 'minute-back', keys: '← ↓', label: 'Back 5 minutes' },
   { id: 'minute-forward', keys: '→ ↑', label: 'Forward 5 minutes' },
   { id: 'hour-back', keys: 'Shift + ← ↓', label: 'Back 1 hour' },
@@ -93,10 +99,68 @@ export function matchShortcut(event: KeyInfo): ShortcutAction | null {
   }
 }
 
+export interface ShortcutTarget {
+  tagName?: string;
+  isContentEditable?: boolean;
+  type?: string;
+  getAttribute?: ((name: string) => string | null) | null;
+}
+
+const EDITABLE_TAGS = new Set(['input', 'textarea', 'select']);
+
+const INTERACTIVE_ROLES = new Set([
+  'button',
+  'link',
+  'checkbox',
+  'radio',
+  'switch',
+  'slider',
+  'spinbutton',
+  'textbox',
+  'searchbox',
+  'combobox',
+  'menuitem',
+  'menuitemcheckbox',
+  'menuitemradio',
+  'option',
+  'tab'
+]);
+
 /** True for shortcuts that should not fire while the user is typing. */
-export function isShortcutBlocked(target: { tagName?: string; isContentEditable?: boolean; type?: string } | null | undefined): boolean {
+export function isEditableTarget(target: ShortcutTarget | null | undefined): boolean {
   if (!target) return false;
   const tag = (target.tagName ?? '').toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+  if (EDITABLE_TAGS.has(tag)) return true;
   return target.isContentEditable === true;
+}
+
+/**
+ * True when the event target is any focusable control (button, link, form
+ * control, ARIA widget). Canvas/body focus is not interactive.
+ */
+export function isInteractiveTarget(target: ShortcutTarget | null | undefined): boolean {
+  if (!target) return false;
+  if (isEditableTarget(target)) return true;
+  const tag = (target.tagName ?? '').toLowerCase();
+  if (tag === 'button' || tag === 'a' || tag === 'summary' || tag === 'iframe') return true;
+  if (tag === 'audio' || tag === 'video') return true;
+  const role = (target.getAttribute?.('role') ?? '').toLowerCase();
+  return INTERACTIVE_ROLES.has(role);
+}
+
+/**
+ * Global shortcuts must not fire on a focused control; Escape is allowed
+ * everywhere so panels can always be dismissed (also from a text field).
+ */
+export function shouldSuppressShortcut(
+  action: ShortcutAction,
+  target: ShortcutTarget | null | undefined
+): boolean {
+  if (action === 'close') return false;
+  return isInteractiveTarget(target);
+}
+
+/** Backwards-compatible name: only typing targets block shortcuts. */
+export function isShortcutBlocked(target: ShortcutTarget | null | undefined): boolean {
+  return isEditableTarget(target);
 }

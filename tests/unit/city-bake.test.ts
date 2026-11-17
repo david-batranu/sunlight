@@ -9,7 +9,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
-import { gunzipSync } from 'node:zlib';
+import { gzipSync, gunzipSync } from 'node:zlib';
 
 import { createCityService } from '../../server/city/service.ts';
 import type { SeedManifest } from '../../server/city/manifest-types.ts';
@@ -175,6 +175,87 @@ test('re-baking reuses an up-to-date seed without fetching', async () => {
     assert.match(stdout, /up to date/);
     const second = await readFile(path.join(outDir, 'manifest.json'), 'utf8');
     assert.equal(second, first);
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+/** Rewrites the baked model bytes/manifest entry, e.g. to simulate a degraded bake. */
+async function patchBakedSeed(
+  outDir: string,
+  slug: string,
+  mutate: (model: Record<string, unknown>) => void,
+  mutateEntry: (entry: Record<string, unknown>) => void = () => undefined
+): Promise<void> {
+  const manifestPath = path.join(outDir, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as SeedManifest;
+  const entry = manifest.cities.find((candidate) => candidate.slug === slug);
+  assert.ok(entry, `expected a manifest entry for ${slug}`);
+  const gzipped = await readFile(path.join(outDir, entry.file));
+  const model = JSON.parse(gunzipSync(gzipped).toString('utf8')) as Record<string, unknown>;
+  mutate(model);
+  const nextGzip = gzipSync(Buffer.from(JSON.stringify(model), 'utf8'), { level: 6 });
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(path.join(outDir, entry.file), nextGzip);
+  entry.bytes = nextGzip.length;
+  entry.sha256 = sha256Hex(nextGzip);
+  mutateEntry(entry as unknown as Record<string, unknown>);
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+}
+
+async function bakeFixtureBrasov(outDir: string): Promise<{ stdout: string }> {
+  return runBake([
+    '--source',
+    'fixture',
+    '--out',
+    outDir,
+    '--only',
+    'brasov',
+    '--radius',
+    '900',
+    '--generated-at',
+    FIXED_TIMESTAMP
+  ]);
+}
+
+test('bake quality gate re-bakes degraded seeds without --force', async () => {
+  const dir = await makeTempDir('sunlight-bake-');
+  try {
+    const outDir = path.join(dir, 'seeds');
+    await bakeFixtureBrasov(outDir);
+    await patchBakedSeed(outDir, 'brasov', (model) => {
+      const meta = model.meta as Record<string, unknown>;
+      meta.degraded = true;
+      meta.degradedReasons = ['terrain unavailable'];
+    });
+    const { stdout } = await bakeFixtureBrasov(outDir);
+    assert.match(stdout, /baked brasov/);
+    assert.doesNotMatch(stdout, /up to date/);
+    const manifest = JSON.parse(await readFile(path.join(outDir, 'manifest.json'), 'utf8')) as SeedManifest;
+    assert.notEqual(manifest.cities[0].degraded, true, 'the re-baked seed must be clean');
+  } finally {
+    await removeTempDir(dir);
+  }
+});
+
+test('bake quality gate re-bakes non-fixture seeds that lost their terrain', async () => {
+  const dir = await makeTempDir('sunlight-bake-');
+  try {
+    const outDir = path.join(dir, 'seeds');
+    await bakeFixtureBrasov(outDir);
+    await patchBakedSeed(
+      outDir,
+      'brasov',
+      (model) => {
+        delete model.terrain;
+      },
+      (entry) => {
+        entry.source = 'overpass';
+      }
+    );
+    const { stdout } = await bakeFixtureBrasov(outDir);
+    assert.match(stdout, /baked brasov/);
+    assert.doesNotMatch(stdout, /up to date/);
   } finally {
     await removeTempDir(dir);
   }

@@ -107,6 +107,14 @@ export interface BuildInput {
   warnings?: string[];
   /** Optional terrain heightfield sampled before the CPU build. */
   terrain?: TerrainRecord | null;
+  /**
+   * Marks the model as usable but incomplete (terrain provider failure or
+   * partial upstream coverage). Persisted as `meta.degraded` so the HTTP layer
+   * can use a short cache profile and seed bakes can treat it as stale.
+   */
+  degraded?: boolean;
+  /** Human-readable degradation reasons (persisted in the model metadata). */
+  degradedReasons?: string[];
 }
 
 interface BuildingDraft {
@@ -421,6 +429,8 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
   const attribution = terrain
     ? `${input.attribution ?? OSM_ATTRIBUTION} · ${TERRAIN_ATTRIBUTION}`
     : (input.attribution ?? OSM_ATTRIBUTION);
+  const degradedReasons = dedupeWarnings(input.degradedReasons ?? [], 8);
+  const degraded = input.degraded === true || degradedReasons.length > 0;
   const meta: ModelMeta = {
     generatedAt: input.generatedAt,
     source: input.source,
@@ -433,7 +443,8 @@ export function buildCityModel(raw: RawOsmData, input: BuildInput, onProgress?: 
       dropped
     },
     warnings: dedupeWarnings(warnings, 24),
-    attribution
+    attribution,
+    ...(degraded ? { degraded: true, degradedReasons } : {})
   };
 
   const model: CityModel = {

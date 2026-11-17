@@ -61,6 +61,33 @@ export function isValidModelKey(key: string): boolean {
   );
 }
 
+export interface ParsedModelKey {
+  kind: 'city' | 'point';
+  radiusM: number;
+  modelVersion: number;
+}
+
+const PARSED_KEY_PATTERN =
+  /^(?:gn-[1-9]\d{0,11}|pt--?\d{1,3}\.\d{5}_-?\d{1,3}\.\d{5})-r(\d{3,4})-v(\d{1,5})$/;
+
+/**
+ * Extracts the embedded radius/version from a model key.
+ *
+ * Keys are opaque identifiers for readers, but cache/seed maintenance needs to
+ * detect entries generated for a different runtime configuration without
+ * trusting the sidecar (which may be stale or tampered with).
+ */
+export function parseModelKey(key: string): ParsedModelKey | null {
+  if (!isValidModelKey(key)) return null;
+  const match = PARSED_KEY_PATTERN.exec(key);
+  if (!match) return null;
+  const radiusM = Number(match[1]);
+  const modelVersion = Number(match[2]);
+  if (!Number.isSafeInteger(radiusM) || radiusM <= 0) return null;
+  if (!Number.isSafeInteger(modelVersion) || modelVersion < 1) return null;
+  return { kind: key.startsWith('pt-') ? 'point' : 'city', radiusM, modelVersion };
+}
+
 /** Validates a key and throws a 400 `CityError` when it cannot be a model key. */
 export function assertValidModelKey(key: string): string {
   if (!isValidModelKey(key)) {

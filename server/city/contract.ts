@@ -9,6 +9,8 @@
 import type {
   CityInfo,
   CitySearchResponse,
+  HealthCheck,
+  HealthWorkerInfo,
   JobStatus,
   ModelMeta,
   ModelTarget,
@@ -43,11 +45,25 @@ export interface QueuedModel {
 
 export type EnsureModelResult = ReadyModel | QueuedModel;
 
+/** Per-call generation options supplied by the API layer. */
+export interface EnsureModelOptions {
+  /** Stable client identity used for the per-client job cap. */
+  clientId?: string;
+  /** Pre-resolved target to avoid resolving (and scanning the index) twice. */
+  resolved?: ResolvedTarget;
+}
+
 export interface CityServiceHealth {
   cache: { models: number; bytes: number; maxBytes: number };
   queue: { active: number; queued: number };
   providers: Record<string, 'up' | 'down' | 'unknown'>;
   seeds: { count: number; slugs: string[] };
+  /** True when the core serving contract is available. */
+  ready: boolean;
+  /** True when the service is serving with reduced capability. */
+  degraded: boolean;
+  checks: HealthCheck[];
+  worker: HealthWorkerInfo;
 }
 
 export interface CityService {
@@ -55,7 +71,7 @@ export interface CityService {
   search(query: string, limit?: number): CitySearchResponse;
   nearest(lat: number, lon: number): NearestCityResponse | null;
   resolve(target: ModelTarget): ResolvedTarget;
-  ensureModel(target: ModelTarget): Promise<EnsureModelResult>;
+  ensureModel(target: ModelTarget, options?: EnsureModelOptions): Promise<EnsureModelResult>;
   getJob(jobId: string): JobStatus | null;
   cancelJob(jobId: string): boolean;
   readModel(key: string): Promise<ReadyModel | null>;

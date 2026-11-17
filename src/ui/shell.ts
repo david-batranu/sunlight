@@ -9,7 +9,7 @@
 
 import type { AppState } from '../app/state.ts';
 import type { UIHandle, UIContext } from '../app/contracts.ts';
-import { interpolateSky } from '../app/time.ts';
+import { interpolateSky, formatDateLong } from '../app/time.ts';
 import type { CurrentLight } from '../app/contracts.ts';
 import { resolveBackdrop } from './backdrop.ts';
 import type { Mood } from './format.ts';
@@ -21,16 +21,21 @@ import { createTimeConsole, type TimeConsoleHandle } from './time-console.ts';
 import { createTopBar, type TopBarHandle } from './topbar.ts';
 import { createCompass, type CompassHandle } from './compass.ts';
 import { createFeatureTooltip, type FeatureTooltipHandle } from './tooltip.ts';
-import { createAreaPickHint, type AreaPickHandle } from './area-pick.ts';
-import { createDetailMinimap, type DetailMinimapHandle } from './minimap.ts';
-import { createPatcher, el, on } from './dom.ts';
-import { isShortcutBlocked, matchShortcut } from './shortcuts.ts';
+import { createDetailMinimap, areaPanelMode, type DetailMinimapHandle } from './minimap.ts';
+import { createPatcher, el, on, setInert } from './dom.ts';
+import { matchShortcut, shouldSuppressShortcut } from './shortcuts.ts';
+
+type InertMode = 'none' | 'overlay' | 'area';
+
+const PHONE_QUERY = '(max-width: 680px)';
 
 export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
   const patcher = createPatcher(document.documentElement);
   const app = el('div', 'sl-app');
   app.dataset.phase = 'boot';
   app.dataset.mood = 'day';
+  app.dataset.area = 'closed';
+  app.dataset.areaMode = 'panel';
   root.replaceChildren(app);
 
   let search: SearchDialogHandle | null = null;
@@ -67,7 +72,6 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
 
   const compass: CompassHandle = createCompass(ctx);
   const tooltip: FeatureTooltipHandle = createFeatureTooltip(ctx);
-  const areaPick: AreaPickHandle = createAreaPickHint(ctx);
   const detailMinimap: DetailMinimapHandle = createDetailMinimap(ctx);
 
   const progress = createProgressOverlay(ctx, () => openSearch());
@@ -97,21 +101,66 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     }
   });
 
+  // Polite status region: announces completed city loads and date changes that
+  // are otherwise silent for screen-reader users.
+  const appStatus = el('p', 'sl-sr-only');
+  appStatus.dataset.testid = 'app-status';
+  appStatus.setAttribute('role', 'status');
+  appStatus.setAttribute('aria-live', 'polite');
+  appStatus.setAttribute('aria-atomic', 'true');
+
   app.append(
     topbar.element,
     compass.element,
+    detailMinimap.backdrop,
     detailMinimap.element,
     lightPanel.element,
     lightPanel.scrim,
     timeConsole.element,
     tooltip.element,
-    areaPick.element,
     notices.element,
+    appStatus,
     progress.element,
     errorCard.element,
     search.element,
     about.element
   );
+
+  /* ------------------------------------------------------------------ */
+  /* Blocking surfaces: make the rest of the UI inert                    */
+  /* ------------------------------------------------------------------ */
+
+  const sceneCanvas = document.querySelector<HTMLElement>('#scene');
+  const inertTargets = [
+    topbar.element,
+    compass.element,
+    lightPanel.element,
+    lightPanel.scrim,
+    timeConsole.element,
+    tooltip.element,
+  ];
+  let lastInert: InertMode = 'none';
+
+  function applyInert(state: AppState): void {
+    const overlayOpen = progress.isOpen() || errorCard.isOpen();
+    const sheetArea = state.detailPanelOpen && areaPanelMode(window.innerWidth, window.innerHeight) === 'sheet';
+    const next: InertMode = overlayOpen ? 'overlay' : sheetArea ? 'area' : 'none';
+    if (next === lastInert) return;
+    lastInert = next;
+    for (const target of inertTargets) setInert(target, false);
+    setInert(detailMinimap.element, false);
+    setInert(detailMinimap.backdrop, false);
+    setInert(sceneCanvas, false);
+    if (next === 'overlay') {
+      for (const target of inertTargets) setInert(target, true);
+      setInert(detailMinimap.element, true);
+      setInert(detailMinimap.backdrop, true);
+      setInert(sceneCanvas, true);
+    } else if (next === 'area') {
+      for (const target of inertTargets) setInert(target, true);
+      setInert(sceneCanvas, true);
+    }
+  }
 
   /* ------------------------------------------------------------------ */
   /* Keyboard shortcuts                                                 */
@@ -166,19 +215,16 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.defaultPrevented) return;
     if (search?.isOpen() || about?.isOpen()) return;
-    if (isShortcutBlocked(event.target as HTMLElement | null)) return;
     const action = matchShortcut(event);
     if (!action) return;
     if (action === 'close') {
+      // Escape is handled before the focus guard so it also works from text
+      // fields and sliders, and always returns focus to the invoking control.
       const state = ctx.store.getState();
       if (state.detailPanelOpen) {
         event.preventDefault();
         ctx.actions.closeDetailPanel();
-        return;
-      }
-      if (state.pickingArea) {
-        event.preventDefault();
-        ctx.actions.cancelAreaPick();
+        topbar.focusAreaButton();
         return;
       }
       if (state.hover) {
@@ -187,12 +233,15 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
         return;
       }
       const panelOpen = lightPanel?.isOpen() ?? false;
-      if (panelOpen && window.matchMedia('(max-width: 680px)').matches) {
+      if (panelOpen && window.matchMedia(PHONE_QUERY).matches) {
         event.preventDefault();
         lightPanel?.close();
       }
       return;
     }
+    // Space/Enter and the arrow keys belong to the focused control; global
+    // shortcuts only run from the canvas/body context.
+    if (shouldSuppressShortcut(action, event.target as HTMLElement | null)) return;
     event.preventDefault();
     runAction(action);
   };
@@ -205,6 +254,9 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
   let destroyed = false;
   let lastPhase = '';
   let lastMood = '';
+  let lastDetailOpen = false;
+  let announcedModelKey: string | null = null;
+  let announcedDate: string | null = null;
 
   function resolveLight(state: AppState): CurrentLight | null {
     if (state.current) return state.current;
@@ -227,20 +279,37 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     return backdrop.mood;
   }
 
+  function announce(state: AppState): void {
+    let message = '';
+    if (state.phase === 'ready' && state.model) {
+      if (state.model.key !== announcedModelKey) {
+        announcedModelKey = state.model.key;
+        const stats = state.model.meta.stats;
+        message = `Loaded ${state.city?.name ?? 'the city'}. ${stats.buildings.toLocaleString('en-GB')} buildings.`;
+      } else if (!state.playing && state.date !== announcedDate && announcedDate !== null) {
+        message = `Date changed to ${formatDateLong(state.date)}.`;
+      }
+      announcedDate = state.date;
+    } else if (state.phase !== 'ready') {
+      announcedDate = null;
+    }
+    if (message) appStatus.textContent = message;
+  }
+
   function update(state: AppState): void {
     if (destroyed) return;
     const light = resolveLight(state);
     const mood = applyBackdrop(state, light);
     app.dataset.playing = state.playing ? 'true' : 'false';
     app.dataset.loading = state.phase === 'ready' ? 'false' : 'true';
-    app.dataset.picking = state.pickingArea ? 'true' : 'false';
-    document.body.dataset.picking = state.pickingArea ? 'true' : 'false';
+    const panelOpen = state.detailPanelOpen;
+    app.dataset.area = panelOpen ? 'open' : 'closed';
+    app.dataset.areaMode = areaPanelMode(window.innerWidth, window.innerHeight);
 
     topbar.update(state);
     compass.update(state);
     detailMinimap.update(state);
     tooltip.update(state);
-    areaPick.update(state);
     timeConsole?.update(state, light);
     lightPanel?.update(state, light, mood);
     progress.update(state);
@@ -248,18 +317,25 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     notices.update(state);
     search?.update(state);
     about?.update(state);
+
+    applyInert(state);
+    if (lastDetailOpen && !panelOpen) topbar.focusAreaButton();
+    lastDetailOpen = panelOpen;
+    announce(state);
   }
+
+  const disposeResize = on(window, 'resize', () => update(ctx.store.getState()));
 
   return {
     update,
     destroy(): void {
       destroyed = true;
       disposeKeyboard();
+      disposeResize();
       topbar.destroy();
       compass.destroy();
       detailMinimap.destroy();
       tooltip.destroy();
-      areaPick.destroy();
       timeConsole?.destroy();
       lightPanel?.destroy();
       search?.destroy();
@@ -274,6 +350,8 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
       delete app.dataset.phase;
       delete app.dataset.mood;
       delete app.dataset.picking;
+      delete app.dataset.area;
+      delete app.dataset.areaMode;
     }
   };
 }

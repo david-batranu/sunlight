@@ -56,8 +56,6 @@ export interface AppActions {
   focusDetailWindow(): void;
   /** Recenters/generates the high-detail model at the selected detail window. */
   loadDetailArea(): void;
-  beginAreaPick(): void;
-  cancelAreaPick(): void;
   dismissHover(): void;
   retry(): void;
   cancelGeneration(): void;
@@ -99,7 +97,18 @@ export interface SceneDebug {
     intensity: number;
     shadow: boolean;
   };
-  render: { drawCalls: number; triangles: number; fps: number };
+  render: {
+    drawCalls: number;
+    triangles: number;
+    fps: number;
+    /** Lifetime rendered frames; unchanged while the idle gate is closed. */
+    framesRendered: number;
+    frameIntervalMedianMs: number;
+    frameIntervalP95Ms: number;
+    rendersPerSecond: number;
+    quality: 'high' | 'low';
+    dpr: number;
+  };
   modelKey: string | null;
 }
 
@@ -122,6 +131,12 @@ export interface SceneHandle {
   setDetailWindow(window: DetailWindow | null): void;
   /** Fits the camera to a detail window (with context margin). */
   focusDetailWindow(window: DetailWindow): void;
+  /** Pan the camera target by a world-space XZ delta. */
+  panBy(dx: number, dz: number): void;
+  /** Zoom by a multiplicative factor. */
+  zoomBy(factor: number): void;
+  /** Forces one synchronous render (used by readback/screenshot tests). */
+  renderNow(): void;
 }
 
 export interface UIContext {

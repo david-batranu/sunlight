@@ -17,6 +17,7 @@ import type { CityModel, SkyDay } from '../../shared/types.ts';
 import type { DetailWindow, HitFeature, SceneDebug, SceneHandle } from '../app/contracts.ts';
 import {
   CAMERA_DISTANCE_M,
+  detailFocusZoom,
   fitBoxFor,
   fitHalfHeight,
   fitTargetY,
@@ -26,6 +27,7 @@ import {
   wrapAzimuth
 } from './camera.ts';
 import { DioramaControls } from './controls.ts';
+import { FrameStats } from './frame-stats.ts';
 import {
   buildModelBuffers,
   shadowRadiusFor,
@@ -43,6 +45,7 @@ import {
   type ShadowConfig
 } from './light.ts';
 import {
+  DEFAULT_RADIUS_M,
   modelExtentsFor,
   plinthProfile,
   type ModelExtents,
@@ -54,24 +57,26 @@ import {
   type DirectionalLightState,
   type LightState
 } from './palette.ts';
+import {
+  ADAPTIVE_SAMPLE_FRAMES,
+  QUALITY,
+  degradeQualityForFrameTime,
+  qualityForEnvironment,
+  type SceneQuality
+} from './quality.ts';
 
-export type SceneQuality = 'high' | 'low';
+export type { SceneQuality } from './quality.ts';
 
-interface QualitySettings {
-  dprCap: number;
-  shadowMapSize: number;
-  showTrees: boolean;
-}
-
-const QUALITY: Readonly<Record<SceneQuality, QualitySettings>> = {
-  high: { dprCap: 2, shadowMapSize: 2048, showTrees: true },
-  low: { dprCap: 1.25, shadowMapSize: 1024, showTrees: false }
-};
-
+/** Adaptive-policy frame intervals must be this close together to count as a
+ *  continuous rendering run; interaction gaps end a run. */
+const CONTINUOUS_RENDER_MAX_GAP_MS = 250;
 const CAMERA_NEAR = 5;
 const CAMERA_FAR = 14000;
-const FPS_WINDOW_MS = 500;
 const SHADOW_ALTITUDE_STEP = 0.5;
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 interface ShadowRig {
   light: THREE.DirectionalLight;
@@ -109,7 +114,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Three 0.187 removed PCFSoftShadowMap (it warned and silently used PCF).
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  // Shadows depend on the light rig/model, not the camera: rebuild them only
+  // when lighting/geometry/quality invalidates them (see invalidateShadows()).
+  renderer.shadowMap.autoUpdate = false;
   renderer.setClearColor(0x000000, 0);
 
   const scene = new THREE.Scene();
@@ -192,7 +201,20 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
 
   const controls = new DioramaControls(canvas);
 
-  let quality: SceneQuality = 'high';
+  /** Initial tier: phones/small screens start low so their first seconds are
+   *  not spent at full DPR before the adaptive policy has any data. */
+  function initialQuality(): SceneQuality {
+    const coarsePointer =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(pointer: coarse)').matches;
+    return qualityForEnvironment({
+      coarsePointer,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight
+    });
+  }
+
+  let quality: SceneQuality = initialQuality();
   let extents: ModelExtents = modelExtentsFor(null);
   let profile: PlinthProfile = plinthProfile(extents);
   let fitBox = fitBoxFor(extents, profile.outerHalfX, profile.outerHalfZ, profile.bottomY);
@@ -235,14 +257,42 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   const lightState: LightState = createLightState();
 
   /* ---------------------------------------------------------------- */
-  /* Rendering loop                                                    */
+  /* On-demand rendering scheduler                                     */
   /* ---------------------------------------------------------------- */
 
+  /** Rendered-frame statistics for getDebug()/E2E (median/p95 cadence). */
+  const frameStats = new FrameStats();
+
+  /** Set when the visible scene must be re-rendered (lighting/model/UI/…). */
+  let needsRender = true;
   let animationFrame = 0;
-  let lastFrameAt = 0;
-  let fpsFrames = 0;
-  let fpsSince = 0;
-  let fps = 0;
+  let lastRenderAt = 0;
+  let lastLoopAt = 0;
+  let lastRafIntervalMs = 0;
+
+  /**
+   * Pose/matrix state of the last rendered frame. Comparing six numbers each
+   * rAF tick detects camera motion exactly (damping converges to the exact
+   * target) and lets the loop stop calling `renderer.render` once settled —
+   * without allocating or subscribing to control events.
+   */
+  const renderedPose = {
+    azimuth: Number.NaN,
+    pitch: Number.NaN,
+    zoom: Number.NaN,
+    targetX: Number.NaN,
+    targetZ: Number.NaN,
+    targetY: Number.NaN
+  };
+
+  /** Consecutive rendered frames close enough together to be a live run. */
+  let continuousFrames = 0;
+
+  /** Coalesced resize: observers only flag; the frame loop applies it once. */
+  let resizePending = false;
+  let appliedWidth = 0;
+  let appliedHeight = 0;
+  let appliedDpr = 0;
 
   /* ---------------------------------------------------------------- */
   /* Geometry helpers                                                  */
@@ -256,8 +306,17 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     if (buffers.triangles <= 0) return null;
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(buffers.positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(buffers.colors, 3));
-    geometry.computeVertexNormals();
+    // Colours are authored as linear floats; normalized Uint8 halves the
+    // attribute bandwidth with no visible difference at 8 bits/channel.
+    const packedColors = new Uint8Array(buffers.colors.length);
+    for (let i = 0; i < buffers.colors.length; i += 1) {
+      packedColors[i] = Math.round(Math.max(0, Math.min(1, buffers.colors[i] ?? 0)) * 255);
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(packedColors, 3, true));
+    // No normal attribute: the shared material is flat-shaded, so Three derives
+    // per-face normals in the fragment shader (dFdx/dFdy). This drops a third of
+    // the vertex data (~10 MB per city) and keeps the flat look; the normal is
+    // never sampled in the fragment stage.
     geometry.computeBoundingSphere();
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = castShadow;
@@ -316,7 +375,17 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     camera.lookAt(controls.targetX, targetY, controls.targetZ);
   }
 
-  function resize(): void {
+  function currentDpr(): number {
+    return Math.min(window.devicePixelRatio || 1, QUALITY[quality].dprCap);
+  }
+
+  /**
+   * Applies the current canvas size/DPR, early-outing when the drawing buffer
+   * would not change (ResizeObserver + window resize both funnel here, and the
+   * common URL-bar animation fires many identical callbacks).
+   * Returns true when the renderer state was actually updated.
+   */
+  function applyResize(): boolean {
     const width = Math.max(
       1,
       Math.round(canvas.clientWidth || canvas.parentElement?.clientWidth || window.innerWidth)
@@ -325,15 +394,32 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
       1,
       Math.round(canvas.clientHeight || canvas.parentElement?.clientHeight || window.innerHeight)
     );
+    const dpr = currentDpr();
+    if (width === appliedWidth && height === appliedHeight && dpr === appliedDpr) return false;
+    appliedWidth = width;
+    appliedHeight = height;
+    appliedDpr = dpr;
     aspect = width / height;
     viewportHeight = height;
-    const dpr = Math.min(window.devicePixelRatio || 1, QUALITY[quality].dprCap);
     renderer.setPixelRatio(dpr);
     renderer.setSize(width, height, false);
     halfHeight = fitHalfHeight(fitBox, aspect);
     applyProjection();
     controls.setViewMetrics(halfHeight, height);
     updateCamera();
+    needsRender = true;
+    return true;
+  }
+
+  /** Coalesces observer bursts into a single resize on the next rAF tick. */
+  function scheduleResize(): void {
+    resizePending = true;
+  }
+
+  /** Public resize (SceneHandle): applied immediately for direct callers. */
+  function resize(): void {
+    resizePending = false;
+    applyResize();
   }
 
   function refitCamera(): void {
@@ -407,6 +493,12 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     );
   }
 
+  /** Marks the shadow depth map for a one-off rebuild on the next render. */
+  function invalidateShadows(): void {
+    renderer.shadowMap.needsUpdate = true;
+    needsRender = true;
+  }
+
   function applyLighting(): void {
     sampleLightInto(lightSample, sky, minute);
     updateLightState(lightState, lightSample, moonIllumination);
@@ -419,6 +511,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     hemisphere.groundColor.setHex(lightState.ambient.groundColor);
     hemisphere.intensity = lightState.ambient.intensity;
     renderer.toneMappingExposure = lightState.exposure;
+    // Sun/moon direction (or shadow camera fit) changed: the depth pass is only
+    // valid for the previous rig. Camera-only motion never reaches this path.
+    invalidateShadows();
   }
 
   function applyLightingIfNeeded(force = false): void {
@@ -516,6 +611,16 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
 
   function setDetailWindow(nextDetailWindow: DetailWindow | null): void {
     if (disposed) return;
+    const previous = detailWindow;
+    const unchanged =
+      previous === null && nextDetailWindow === null
+        ? true
+        : previous !== null &&
+          nextDetailWindow !== null &&
+          previous.centerX === nextDetailWindow.centerX &&
+          previous.centerZ === nextDetailWindow.centerZ &&
+          previous.radiusM === nextDetailWindow.radiusM;
+    if (unchanged) return;
     detailWindow = nextDetailWindow;
     if (nextDetailWindow) {
       detailUniforms.uDetailEnabled.value = 1;
@@ -524,19 +629,32 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     } else {
       detailUniforms.uDetailEnabled.value = 0;
     }
+    // Uniform-only change: redraw the frame, but the shadow rig is unaffected.
+    needsRender = true;
   }
 
   function focusDetailWindow(window: DetailWindow): void {
     if (disposed) return;
-    // Show the selected square with surrounding context, but never pull the
-    // camera so far back that it shows empty space beyond the loaded model.
-    const modelRadius = currentModel?.meta.radiusM ?? 1500;
-    const desiredHeight = Math.min(
-      Math.max(360, window.radiusM * 2 * 2.4),
-      modelRadius * 2 * 1.05
-    );
-    const zoom = Math.max(0.45, Math.min(32, (halfHeight * 2) / desiredHeight));
+    // Frame the selected square with surrounding context. The pure helper keeps
+    // zoom >= the model-fit view, so Focus never pulls back into empty space
+    // (the default 750 m window used to zoom *out* from 1.00 to 0.97).
+    const modelRadius = currentModel?.meta.radiusM ?? DEFAULT_RADIUS_M;
+    const zoom = detailFocusZoom(halfHeight, modelRadius, window.radiusM);
     controls.setFocus(window.centerX, window.centerZ, zoom);
+    if (prefersReducedMotion()) {
+      controls.snap();
+      needsRender = true;
+    }
+  }
+
+  function panBy(dx: number, dz: number): void {
+    if (disposed) return;
+    controls.panBy(dx, dz);
+  }
+
+  function zoomBy(factor: number): void {
+    if (disposed) return;
+    controls.zoomBy(factor);
   }
 
   function setSky(nextSky: SkyDay | null): void {
@@ -563,6 +681,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     if (nextQuality !== 'high' && nextQuality !== 'low') return;
     if (nextQuality === quality) return;
     quality = nextQuality;
+    continuousFrames = 0;
     sunRig.mapSize = 0;
     moonRig.mapSize = 0;
     if (treesMesh) treesMesh.visible = QUALITY[quality].showTrees;
@@ -577,11 +696,43 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     updateCamera();
   }
 
+  /**
+   * Debug payload for E2E/manual inspection. Draw calls/triangles come from the
+   * most recent render, which is the settled main pass once shadows are on
+   * demand (e.g. 6 draws / ~245k triangles for the Brașov seed); `fps` is the
+   * steady-state rendered-frame rate (median cadence) instead of the old
+   * first-frame EMA. The rolling interval fields and `framesRendered` make
+   * idle gating observable. `quality`/`dpr` are additive (contracts.ts pending).
+   */
   function getDebug(): SceneDebug {
     const kind = lightState.kind;
     const active =
       kind === 'sun' ? lightState.sun : kind === 'moon' ? lightState.moon : lightState.none;
-    const loop = currentFps();
+    const snapshot = frameStats.snapshot(debugNow());
+    const fps =
+      snapshot.medianMs > 0
+        ? Math.min(240, 1000 / snapshot.medianMs)
+        : lastRafIntervalMs > 0
+          ? Math.min(240, 1000 / Math.max(lastRafIntervalMs, 1000 / 240))
+          : 0;
+    const render: SceneDebug['render'] & {
+      framesRendered: number;
+      frameIntervalMedianMs: number;
+      frameIntervalP95Ms: number;
+      rendersPerSecond: number;
+      quality: SceneQuality;
+      dpr: number;
+    } = {
+      drawCalls: renderer.info.render.calls,
+      triangles: renderer.info.render.triangles,
+      fps: Math.round(fps * 10) / 10,
+      framesRendered: snapshot.framesRendered,
+      frameIntervalMedianMs: Math.round(snapshot.medianMs * 100) / 100,
+      frameIntervalP95Ms: Math.round(snapshot.p95Ms * 100) / 100,
+      rendersPerSecond: snapshot.rendersPerSecond,
+      quality,
+      dpr: currentDpr()
+    };
     return {
       camera: {
         azimuthDeg: wrapAzimuth(controls.azimuthDeg),
@@ -597,11 +748,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
         intensity: active.intensity,
         shadow: active.castShadow
       },
-      render: {
-        drawCalls: renderer.info.render.calls,
-        triangles: renderer.info.render.triangles,
-        fps: loop
-      },
+      render,
       modelKey
     };
   }
@@ -611,7 +758,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     disposed = true;
     cancelAnimationFrame(animationFrame);
     resizeObserver.disconnect();
-    window.removeEventListener('resize', resize);
+    window.removeEventListener('resize', scheduleResize);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
     canvas.removeEventListener('webglcontextlost', onContextLost);
     canvas.removeEventListener('webglcontextrestored', onContextRestored);
     controls.dispose();
@@ -627,35 +775,102 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   }
 
   /* ---------------------------------------------------------------- */
-  /* FPS + frame loop                                                  */
+  /* Render stats + frame loop                                         */
   /* ---------------------------------------------------------------- */
 
-  function currentFps(): number {
-    return fps > 0 ? Math.round(fps) : 0;
+  function debugNow(): number {
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+
+  /** True when the camera state differs from the pose used for the last render. */
+  function cameraPoseChanged(): boolean {
+    return (
+      controls.azimuthDeg !== renderedPose.azimuth ||
+      controls.pitchDeg !== renderedPose.pitch ||
+      controls.zoomLevel !== renderedPose.zoom ||
+      controls.targetX !== renderedPose.targetX ||
+      controls.targetZ !== renderedPose.targetZ ||
+      targetY !== renderedPose.targetY
+    );
+  }
+
+  function markPoseRendered(): void {
+    renderedPose.azimuth = controls.azimuthDeg;
+    renderedPose.pitch = controls.pitchDeg;
+    renderedPose.zoom = controls.zoomLevel;
+    renderedPose.targetX = controls.targetX;
+    renderedPose.targetZ = controls.targetZ;
+    renderedPose.targetY = targetY;
+  }
+
+  /**
+   * Steps the tier down when a sustained continuous-render run misses the
+   * frame budget. One-way and sample-gated (90 frames) so brief hitches or
+   * slow CI rasterisers cannot flip the tier mid-screenshot.
+   */
+  function adaptQualityIfNeeded(): void {
+    if (quality !== 'high' || continuousFrames < ADAPTIVE_SAMPLE_FRAMES) return;
+    // Evaluate in fixed-size blocks so the window sort never runs per frame.
+    continuousFrames = 0;
+    const snapshot = frameStats.snapshot(debugNow());
+    const next = degradeQualityForFrameTime(quality, snapshot.medianMs, snapshot.samples);
+    if (!next) return;
+    setQuality(next);
+  }
+
+  /**
+   * Lightweight loop: runs every rAF tick (so damping and the debug cadence
+   * stay live) but only calls `renderer.render` when something visible changed.
+   * A settled scene — paused time, still camera, no UI changes — renders 0
+   * frames/s while the tab is visible and 0 while it is hidden.
+   */
+  /** Forces one render synchronously; used by pixel-readback tests. */
+  function renderNow(): void {
+    if (disposed) return;
+    updateCamera();
+    renderer.render(scene, camera);
+    needsRender = false;
+    markPoseRendered();
+    lastRenderAt = debugNow();
+    lastLoopAt = lastRenderAt;
+    frameStats.push(lastRenderAt, 0);
   }
 
   function frame(now: number): void {
     if (disposed) return;
     animationFrame = requestAnimationFrame(frame);
-    const dt = lastFrameAt > 0 ? Math.min(0.1, Math.max(0, (now - lastFrameAt) / 1000)) : 1 / 60;
-    lastFrameAt = now;
-    if (fps === 0) {
-      // Give E2E/debug consumers a sane number before the first full window.
-      fps = Math.min(240, 1 / Math.max(dt, 1 / 240));
+    if (document.hidden) {
+      lastLoopAt = now;
+      lastRafIntervalMs = 0;
+      continuousFrames = 0;
+      return;
     }
-    controls.update(dt);
-    updateCamera();
-    renderer.render(scene, camera);
+    const dt = lastLoopAt > 0 ? Math.min(0.1, Math.max(0, (now - lastLoopAt) / 1000)) : 1 / 60;
+    if (lastLoopAt > 0 && now > lastLoopAt) lastRafIntervalMs = Math.min(1000, now - lastLoopAt);
+    lastLoopAt = now;
 
-    fpsFrames += 1;
-    if (fpsSince === 0) {
-      fpsSince = now;
-    } else if (now - fpsSince >= FPS_WINDOW_MS) {
-      const sample = (fpsFrames * 1000) / (now - fpsSince);
-      fps = fps > 0 ? fps * 0.7 + sample * 0.3 : sample;
-      fpsFrames = 0;
-      fpsSince = now;
+    if (resizePending) {
+      resizePending = false;
+      applyResize();
     }
+
+    controls.update(dt);
+    const cameraMoved = cameraPoseChanged();
+    if (!cameraMoved && !needsRender) return;
+    if (cameraMoved) updateCamera();
+    renderer.render(scene, camera);
+    needsRender = false;
+    markPoseRendered();
+
+    const interval = lastRenderAt > 0 ? now - lastRenderAt : 0;
+    lastRenderAt = now;
+    frameStats.push(now, interval);
+    if (interval > 0 && interval <= CONTINUOUS_RENDER_MAX_GAP_MS) {
+      continuousFrames += 1;
+    } else if (interval > CONTINUOUS_RENDER_MAX_GAP_MS) {
+      continuousFrames = 0;
+    }
+    adaptQualityIfNeeded();
   }
 
   /* ---------------------------------------------------------------- */
@@ -669,15 +884,42 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   function onContextRestored(): void {
     if (disposed) return;
     resize();
+    invalidateShadows();
+    needsRender = true;
     renderer.render(scene, camera);
+    needsRender = false;
+    markPoseRendered();
+    lastRenderAt = debugNow();
+    lastLoopAt = lastRenderAt;
+  }
+
+  function onVisibilityChange(): void {
+    if (disposed) return;
+    if (document.hidden) {
+      // Nothing may render off-screen; suspend cadence bookkeeping.
+      lastLoopAt = 0;
+      lastRafIntervalMs = 0;
+      continuousFrames = 0;
+      return;
+    }
+    // Coming back may have missed lighting/model changes while parked: render
+    // one guaranteed frame, then let the normal dirty tracking take over.
+    needsRender = true;
+    lastLoopAt = 0;
+    lastRenderAt = 0;
   }
 
   canvas.addEventListener('webglcontextlost', onContextLost, false);
   canvas.addEventListener('webglcontextrestored', onContextRestored, false);
 
-  const resizeObserver = new ResizeObserver(() => resize());
+  // One coalesced resize path: both observers only flag, the frame loop applies
+  // at most one resize per rAF and early-outs when the drawing buffer size is
+  // unchanged. The window listener is kept for DPR changes that do not alter
+  // the canvas CSS box (e.g. dragging the window between monitors).
+  const resizeObserver = new ResizeObserver(() => scheduleResize());
   resizeObserver.observe(canvas);
-  window.addEventListener('resize', resize, { passive: true });
+  window.addEventListener('resize', scheduleResize, { passive: true });
+  document.addEventListener('visibilitychange', onVisibilityChange);
 
   resize();
   updateLightTargets();
@@ -692,6 +934,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     setQuality,
     setDetailWindow,
     focusDetailWindow,
+    panBy,
+    zoomBy,
+    renderNow,
     resetCamera,
     resize,
     dispose,

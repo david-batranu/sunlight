@@ -17,13 +17,16 @@ export class CityError extends Error {
   readonly retryable: boolean;
   /** Optional structured context (never contains secrets). */
   readonly details?: unknown;
+  /** Optional retry hint in seconds (drives the `Retry-After` header). */
+  readonly retryAfterSec?: number;
 
   constructor(
     code: string,
     message: string,
     status: CityErrorStatus = 500,
     retryable = false,
-    details?: unknown
+    details?: unknown,
+    retryAfterSec?: number
   ) {
     super(message);
     this.name = 'CityError';
@@ -31,6 +34,7 @@ export class CityError extends Error {
     this.status = status;
     this.retryable = retryable;
     this.details = details;
+    this.retryAfterSec = retryAfterSec;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }

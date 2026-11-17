@@ -1,0 +1,29 @@
+# Example edge configuration for the public Sunlight deployment.
+#
+# Copy this into your Caddy site block (or keep it as a separate site), adjust
+# the domain, and keep the container name/network in sync with
+# docker-compose.yml. The app intentionally sets its own CSP, nosniff, CORP and
+# COOP headers; HSTS belongs at the TLS edge.
+#
+# The app is published on the loopback port 8090 and joined to a Docker network
+# named "sunlight". Caddy reaches it as http://sunlight:8090.
+
+(security_headers) {
+	header {
+		# HSTS is emitted by the app itself; keep it in one place.
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(self), camera=(), microphone=()"
+		-Server
+	}
+}
+
+seekahead.eu {
+	import security_headers
+	encode zstd gzip
+
+	redir /sunlight /sunlight/ 308
+	handle_path /sunlight/* {
+		reverse_proxy sunlight:8090
+	}
+}

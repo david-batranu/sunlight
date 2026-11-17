@@ -112,6 +112,9 @@ export function createTimeConsole(ctx: UIContext, callbacks: TimeConsoleCallback
       </button>
       <span class="sl-mode-hint" data-testid="mode-hint">Paused</span>
     </div>
+    <p class="sl-attrib-line sl-time-attrib" data-testid="osm-attribution">
+      Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>
+    </p>
   `
   );
   element.setAttribute('aria-label', 'Time and date controls');

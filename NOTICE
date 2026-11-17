@@ -1,0 +1,25 @@
+Sunlight — data and asset notices
+
+The application code is original work. See LICENSE (all rights reserved).
+
+City geometry, names and map context are derived from OpenStreetMap:
+  © OpenStreetMap contributors, Open Database License (ODbL) 1.0
+  https://www.openstreetmap.org/copyright
+  https://opendatacommons.org/licenses/odbl/1-0/
+
+The 5 km area picker loads raster map tiles from the OpenStreetMap tile
+service when the picker is opened. Tiles are © OpenStreetMap contributors and
+are used under the OSM tile usage policy:
+  https://operations.osmfoundation.org/policies/tiles/
+
+City search uses the GeoNames cities5000 index:
+  GeoNames, licensed under Creative Commons Attribution 4.0
+  https://www.geonames.org/
+
+Terrain elevation is derived from the AWS Terrain Tiles / Mapzen Terrain Tiles
+dataset and its public DEM sources:
+  https://registry.opendata.aws/terrain-tiles/
+  https://github.com/tilezen/joerd
+
+Solar and lunar positions are computed locally with astronomy-engine
+(MIT licence). The isometric renderer uses Three.js (MIT licence).

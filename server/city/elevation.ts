@@ -22,6 +22,7 @@ import { decodePng } from './png.ts';
 
 const TILE_ENDPOINT = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
 const TILE_SIZE = 256;
+const MAX_TERRAIN_TILE_BYTES = 8 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 20_000;
 const TILE_CACHE_LIMIT = 96;
 
@@ -75,7 +76,13 @@ async function fetchTile(x: number, y: number, signal?: AbortSignal): Promise<Ti
     if (!response.ok) {
       throw new Error(`Terrain tile ${key} returned HTTP ${response.status}`);
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_TERRAIN_TILE_BYTES) {
+      throw new Error('terrain tile response is too large');
+    }
+    const body = new Uint8Array(await response.arrayBuffer());
+    if (body.byteLength > MAX_TERRAIN_TILE_BYTES) throw new Error('terrain tile response is too large');
+    const bytes = body;
     const png = decodePng(bytes);
     if (png.width !== TILE_SIZE || png.height !== TILE_SIZE) {
       throw new Error(`Terrain tile ${key} has unexpected dimensions ${png.width}×${png.height}`);

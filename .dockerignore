@@ -10,3 +10,5 @@ README.md
 *.log
 .DS_Store
 .env
+
+reviews

@@ -8,11 +8,14 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { SeedStore } from '../../server/city/seed-store.ts';
+import { sha256Hex } from '../../server/city/model-io.ts';
 import { MODEL_VERSION } from '../../shared/constants.ts';
 import type { CityInfo } from '../../shared/types.ts';
 import {
   BRASOV_CITY,
   cityKey,
+  gzipModelSync,
+  makeModel,
   makeTempDir,
   removeTempDir,
   writeSeedDir
@@ -116,8 +119,10 @@ test('excludes a seed whose file checksum does not match the manifest', async ()
     await writeFile(file, corrupted);
 
     const store = await SeedStore.load(dir, { modelVersion: MODEL_VERSION, radiusM: 900 });
+    // A partially invalid manifest still serves the seeds that did verify; the
+    // failure is surfaced in the warnings/health instead of discarding them.
     assert.equal(store.count, 1);
-    assert.equal(store.statusValue, 'down');
+    assert.equal(store.statusValue, 'up');
     assert.deepEqual(store.slugs, ['bucharest']);
     assert.ok(store.warningList.some((warning) => warning.startsWith('brasov:')));
   } finally {
@@ -135,7 +140,7 @@ test('rejects manifest entries that try to escape the seeds directory', async ()
     const store = await SeedStore.load(dir, { modelVersion: MODEL_VERSION, radiusM: 900 });
     assert.equal(store.count, 1);
     assert.deepEqual(store.slugs, ['bucharest']);
-    assert.equal(store.statusValue, 'down');
+    assert.equal(store.statusValue, 'up');
   } finally {
     await removeTempDir(tempDir);
   }
@@ -168,6 +173,56 @@ test('list() returns entries in manifest order', async () => {
       store.list().map((entry) => entry.slug),
       ['brasov', 'bucharest']
     );
+  } finally {
+    await removeTempDir(tempDir);
+  }
+});
+
+/** Rewrites a seed's model bytes/meta and its manifest entry (test fixture helper). */
+async function rewriteSeed(
+  dir: string,
+  slug: string,
+  mutate: (model: ReturnType<typeof makeModel>) => void
+): Promise<void> {
+  const manifestPath = path.join(dir, 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const entry = manifest.cities.find((candidate: { slug: string }) => candidate.slug === slug);
+  assert.ok(entry, `seed ${slug} must exist in the manifest`);
+  const model = makeModel(entry.key, {
+    city: slug === 'brasov' ? BRASOV_CITY : BUCHAREST,
+    meta: { seed: true, source: 'seed', radiusM: 900 }
+  });
+  mutate(model);
+  const gzipped = gzipModelSync(model);
+  await writeFile(path.join(dir, entry.file), gzipped);
+  entry.bytes = gzipped.length;
+  entry.sha256 = sha256Hex(gzipped);
+  await writeFile(manifestPath, JSON.stringify(manifest));
+}
+
+test('serves degraded seeds but reports them for health/quality gates', async () => {
+  const { dir, tempDir } = await makeSeeds();
+  try {
+    await rewriteSeed(dir, 'brasov', (model) => {
+      model.meta.degraded = true;
+      model.meta.degradedReasons = ['terrain unavailable'];
+      delete model.terrain;
+    });
+    const store = await SeedStore.load(dir, { modelVersion: MODEL_VERSION, radiusM: 900 });
+    assert.equal(store.count, 2);
+    assert.equal(store.statusValue, 'up');
+    assert.deepEqual(store.degradedSlugs, ['brasov']);
+    assert.equal(store.degradedCount, 1);
+    assert.ok(
+      store.warningList.some((warning) => warning.includes('brasov') && warning.includes('degraded')),
+      'degraded seed must be surfaced as a warning'
+    );
+    const entry = store.byGeonameId(683844);
+    assert.ok(entry);
+    const ready = await store.read(entry);
+    assert.ok(ready, 'degraded seeds are still served');
+    assert.equal(ready.meta.degraded, true);
+    assert.deepEqual(ready.meta.degradedReasons, ['terrain unavailable']);
   } finally {
     await removeTempDir(tempDir);
   }

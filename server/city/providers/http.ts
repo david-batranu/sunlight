@@ -24,6 +24,8 @@ export interface TextResponse {
   status: number;
   ok: boolean;
   text: string;
+  /** Parsed `Retry-After` (capped at 60 s), when the upstream sent one. */
+  retryAfterMs?: number;
 }
 
 /** Abortable sleep; rejects with an `AbortError` when cancelled. */
@@ -97,10 +99,52 @@ export async function requestText(request: TextRequest): Promise<TextResponse> {
     request.signal.removeEventListener('abort', onCallerAbort);
   }
 
+  // Bound the read before buffering: a hostile/broken upstream must not force
+  // a 96 MB allocation (or worse) before the size check. Prefer Content-Length
+  // when present, then enforce the same cap while streaming the body.
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > request.maxBodyBytes) {
+    throw new CityError(
+      'PROVIDER_TOO_LARGE',
+      `The response from ${hostOf(request.url)} exceeded ${Math.round(request.maxBodyBytes / 1e6)} MB.`,
+      502,
+      false
+    );
+  }
   let text: string;
   try {
-    text = await response.text();
+    const body = response.body;
+    if (!body) {
+      text = await response.text();
+    } else {
+      const reader = body.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > request.maxBodyBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw new CityError(
+            'PROVIDER_TOO_LARGE',
+            `The response from ${hostOf(request.url)} exceeded ${Math.round(request.maxBodyBytes / 1e6)} MB.`,
+            502,
+            false
+          );
+        }
+        chunks.push(value);
+      }
+      const merged = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      text = new TextDecoder().decode(merged);
+    }
   } catch (error) {
+    if (error instanceof CityError) throw error;
     if (isAbortError(error) && request.signal.aborted) throw abortLike('Operation aborted');
     throw new CityError('PROVIDER_NETWORK', 'The response body could not be read.', 502, true);
   }
@@ -112,7 +156,31 @@ export async function requestText(request: TextRequest): Promise<TextResponse> {
       false
     );
   }
-  return { status: response.status, ok: response.ok, text };
+  const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
+  return {
+    status: response.status,
+    ok: response.ok,
+    text,
+    ...(retryAfterMs !== null ? { retryAfterMs } : {})
+  };
+}
+
+export const MAX_RETRY_AFTER_MS = 60_000;
+
+/**
+ * Parses a `Retry-After` header (delta-seconds or HTTP-date), capped at 60 s so
+ * a misbehaving upstream can not stall a generation indefinitely.
+ */
+export function parseRetryAfter(value: string | null | undefined, now = Date.now()): number | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) {
+    return Math.min(MAX_RETRY_AFTER_MS, Number(trimmed) * 1000);
+  }
+  const date = Date.parse(trimmed);
+  if (Number.isNaN(date)) return null;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, date - now));
 }
 
 export function hostOf(url: string): string {

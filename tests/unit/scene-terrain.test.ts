@@ -11,6 +11,7 @@ import { terrainHeightM } from '../../shared/terrain.ts';
 import {
   AREA_LIFT_M,
   ROAD_LIFT_M,
+  TERRAIN_MESH_SUBDIVISIONS,
   buildAreas,
   buildBuildings,
   buildModelBuffers,
@@ -131,4 +132,30 @@ test('trees use the terrain height and extents include the relief', () => {
 
   const extents = modelExtentsFor(model);
   assert.ok(extents.maxHeight >= 16, `extents must cover the terrain (${extents.maxHeight})`);
+});
+
+test('terrain mesh uses the compact subdivision and deterministic triangle budget', () => {
+  // Performance fix PR-02: 4×4 subdivisions per wire cell were reduced to 2×2
+  // (−20 % of all submitted triangles) while the wire heightfield still fully
+  // drives road/area draping (sampled from terrainHeightM, not this mesh).
+  assert.equal(TERRAIN_MESH_SUBDIVISIONS, 2);
+
+  const model = terrainModel();
+  model.terrain = { ...TERRAIN, h: new Array(TERRAIN.cols * TERRAIN.rows).fill(0) };
+  const buffers = buildTerrain(model);
+
+  const cells = (TERRAIN.cols - 1) * (TERRAIN.rows - 1);
+  const sub = TERRAIN_MESH_SUBDIVISIONS;
+  // Perimeter skirt: one quad per boundary edge segment (top+bottom+left+right).
+  const skirtTriangles = ((TERRAIN.cols - 1) + (TERRAIN.rows - 1)) * 2 * 2;
+  const expected = cells * sub * sub * 2 + skirtTriangles;
+  assert.equal(buffers.triangles, expected, 'terrain triangle count follows subdivisions');
+  assert.equal(buffers.positions.length, buffers.triangles * 9);
+  assert.equal(buffers.colors.length, buffers.triangles * 9);
+  assert.equal(buffers.featureIndices.length, buffers.triangles);
+
+  // Deterministic: a rebuild of the same model produces byte-identical buffers.
+  const again = buildTerrain(model);
+  assert.deepEqual(Array.from(again.positions), Array.from(buffers.positions));
+  assert.deepEqual(Array.from(again.colors), Array.from(buffers.colors));
 });

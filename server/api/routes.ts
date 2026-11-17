@@ -1,32 +1,42 @@
 /**
- * API routes. The lead owns this file.
+ * API routes.
  *
  * The city service owns OSM fetching/parsing/geometry/caching/jobs; this layer
- * validates input, applies rate limits and turns service errors into HTTP.
+ * validates input, applies per-client rate limits and turns service errors into
+ * HTTP.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AppConfig } from '../config.ts';
-import type {
-  CreateModelResponse,
-  HealthResponse,
-  JobStatus,
-  ModelTarget
-} from '../../shared/types.ts';
+import type { CreateModelResponse, HealthResponse, JobStatus, ModelTarget } from '../../shared/types.ts';
+import { isValidModelKey } from '../city/keys.ts';
 import { CityError, type CityService } from '../city/service.ts';
 import { readJsonBody, requireObject } from '../http/body.ts';
+import { clientRateKey } from '../http/client-ip.ts';
 import { HttpError } from '../http/http-error.ts';
 import { FixedWindowRateLimiter } from '../http/rate-limit.ts';
 import { sendCachedJson, sendError, sendJson } from '../http/respond.ts';
+import { buildHealthResponse, healthHttpStatus } from './health.ts';
 import { SkyDayCache } from './sky-cache.ts';
+import type { HttpMetrics } from '../http/metrics.ts';
 
 const JOB_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
-const MODEL_KEY_RE = /^[A-Za-z0-9._-]{1,96}$/;
+const GET_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD']);
+
+/** Cache profile for fully valid models (content-addressed, immutable bytes). */
+const MODEL_CACHE_IMMUTABLE = 'private, max-age=31536000, immutable';
+/**
+ * Degraded models are usable but incomplete (terrain/coverage failure). They
+ * must be refreshable: a permanent immutable cache would pin a temporary blip
+ * for a year.
+ */
+const MODEL_CACHE_DEGRADED = 'private, max-age=300';
 
 export interface ApiDependencies {
   config: AppConfig;
   cityService: CityService;
   skyCache: SkyDayCache;
+  httpMetrics?: HttpMetrics;
 }
 
 export interface ApiHandler {
@@ -90,19 +100,37 @@ function targetName(target: ModelTarget): string {
   return target.kind === 'city' ? `city ${target.geonameId}` : target.name || 'your location';
 }
 
+function isGetOrHead(method: string): boolean {
+  return GET_METHODS.has(method);
+}
+
+function methodNotAllowed(allowed: string): HttpError {
+  return new HttpError(405, 'METHOD_NOT_ALLOWED', `Use ${allowed}.`, { headers: { Allow: allowed } });
+}
+
+function retryAfterHeaders(retryAfterSec: number | undefined): Record<string, string> | undefined {
+  if (retryAfterSec === undefined) return undefined;
+  return { 'Retry-After': String(Math.max(1, Math.ceil(retryAfterSec))) };
+}
+
 function handleApiError(res: ServerResponse, error: unknown): void {
   if (error instanceof CityError) {
+    // Retry-After only makes sense for unavailability responses (queue caps,
+    // negative cache); deterministic 4xx errors must not invite retries.
+    const retryAfter = error.status === 503 ? error.retryAfterSec ?? 5 : undefined;
     sendError(res, error.status, error.code, error.message, {
       retryable: error.retryable,
-      details: error.details
+      details: error.details,
+      headers: retryAfterHeaders(retryAfter)
     });
     return;
   }
   if (error instanceof HttpError) {
+    const retryAfterSec = error.retryAfterSec ?? (error.status === 429 ? 60 : undefined);
     sendError(res, error.status, error.code, error.message, {
       retryable: error.retryable,
       details: error.details,
-      headers: error.status === 429 ? { 'Retry-After': '60' } : undefined
+      headers: { ...(retryAfterHeaders(retryAfterSec) ?? {}), ...(error.headers ?? {}) }
     });
     return;
   }
@@ -112,46 +140,69 @@ function handleApiError(res: ServerResponse, error: unknown): void {
 
 export function createApiHandler(deps: ApiDependencies): ApiHandler {
   const { config, cityService, skyCache } = deps;
-  const limiter = new FixedWindowRateLimiter(config.rateLimitPerMin);
+  // Generation is expensive; reads are cheap but hot; sky is CPU-heavy and
+  // trivially cache-bustable. Health/readiness is always exempt.
+  const generationLimiter = new FixedWindowRateLimiter(config.rateLimitPerMin);
+  const readLimiter = new FixedWindowRateLimiter(config.readRateLimitPerMin);
+  const skyLimiter = new FixedWindowRateLimiter(config.skyRateLimitPerMin);
+
+  const clientKey = (req: IncomingMessage): string =>
+    clientRateKey(req, {
+      trustProxy: config.trustProxy,
+      ...(config.trustedProxyCidrs.length > 0 ? { trustedProxyCidrs: config.trustedProxyCidrs } : {})
+    });
+
+  const enforce = (limiter: FixedWindowRateLimiter, req: IncomingMessage, message: string): void => {
+    const result = limiter.take(clientKey(req));
+    if (result.allowed) return;
+    throw new HttpError(429, 'RATE_LIMITED', message, {
+      retryable: true,
+      retryAfterSec: result.retryAfterSec
+    });
+  };
 
   return async function handleApi(req, res, url): Promise<boolean> {
     const path = url.pathname;
     const method = req.method || 'GET';
-    const ip = req.socket.remoteAddress || 'unknown';
 
     try {
-      if (path === '/api/health') {
-        if (method !== 'GET') return false;
-        const cityHealth = cityService.health();
-        const health: HealthResponse = {
-          ok: true,
-          version: '0.1.0',
-          modelVersion: config.modelVersion,
-          uptimeSec: Math.round(process.uptime()),
-          cache: cityHealth.cache,
-          queue: cityHealth.queue,
-          providers: cityHealth.providers,
-          seeds: cityHealth.seeds
-        };
-        sendJson(res, 200, { ...health, sky: skyCache.stats() });
+      if (path === '/api/health' || path === '/api/ready') {
+        if (!isGetOrHead(method)) throw methodNotAllowed('GET, HEAD');
+        const health: HealthResponse = buildHealthResponse(
+          config,
+          cityService.health(),
+          skyCache.stats(),
+          deps.httpMetrics?.snapshot()
+        );
+        // `/api/health` reports degraded deployments truthfully but stays 200
+        // so container orchestration does not restart a serving instance;
+        // `/api/ready` is the strict 200/503 probe.
+        if (path === '/api/ready') {
+          sendJson(res, healthHttpStatus(health), health);
+        } else {
+          sendJson(res, 200, health);
+        }
         return true;
       }
 
       if (path === '/api/cities') {
-        if (method !== 'GET') return false;
+        if (!isGetOrHead(method)) throw methodNotAllowed('GET, HEAD');
         const q = (url.searchParams.get('q') || '').trim();
         if (q.length < 1 || q.length > 80) {
           throw new HttpError(400, 'INVALID_QUERY', 'q must be between 1 and 80 characters.');
         }
-        const result = cityService.search(q, parseLimit(url.searchParams.get('limit')));
+        const limit = parseLimit(url.searchParams.get('limit'));
+        enforce(readLimiter, req, 'Too many city searches. Try again in a minute.');
+        const result = cityService.search(q, limit);
         sendJson(res, 200, result);
         return true;
       }
 
       if (path === '/api/cities/nearest') {
-        if (method !== 'GET') return false;
+        if (!isGetOrHead(method)) throw methodNotAllowed('GET, HEAD');
         const lat = parseCoordinate(url.searchParams.get('lat'), 'lat', -90, 90);
         const lon = parseCoordinate(url.searchParams.get('lon'), 'lon', -180, 180);
+        enforce(readLimiter, req, 'Too many city lookups. Try again in a minute.');
         const nearest = cityService.nearest(lat, lon);
         if (!nearest) {
           throw new HttpError(404, 'CITY_NOT_FOUND', 'No nearby city found.');
@@ -161,16 +212,15 @@ export function createApiHandler(deps: ApiDependencies): ApiHandler {
       }
 
       if (path === '/api/models' && method === 'POST') {
-        const budget = limiter.take(ip);
-        if (!budget) {
-          throw new HttpError(429, 'RATE_LIMITED', 'Too many city generation requests. Try again in a minute.', {
-            retryable: true
-          });
-        }
+        // Validate first: rejected payloads must not consume generation quota.
         const body = await readJsonBody(req);
         const target = parseTarget(body);
+        enforce(generationLimiter, req, 'Too many city generation requests. Try again in a minute.');
         const resolved = cityService.resolve(target);
-        const result = await cityService.ensureModel(target);
+        const result = await cityService.ensureModel(target, {
+          clientId: clientKey(req),
+          resolved
+        });
         if (result.state === 'ready') {
           const response: CreateModelResponse = {
             state: 'ready',
@@ -194,13 +244,17 @@ export function createApiHandler(deps: ApiDependencies): ApiHandler {
         return true;
       }
 
+      if (path === '/api/models') {
+        throw methodNotAllowed('POST');
+      }
+
       const jobMatch = /^\/api\/jobs\/([^/]+)$/.exec(path);
       if (jobMatch) {
         const jobId = decodeURIComponent(jobMatch[1]);
         if (!JOB_ID_RE.test(jobId)) {
           throw new HttpError(400, 'INVALID_JOB_ID', 'Invalid job id.');
         }
-        if (method === 'GET') {
+        if (method === 'GET' || method === 'HEAD') {
           const job = cityService.getJob(jobId);
           if (!job) throw new HttpError(404, 'JOB_NOT_FOUND', 'Unknown generation job.');
           const status: JobStatus = { ...job };
@@ -215,14 +269,16 @@ export function createApiHandler(deps: ApiDependencies): ApiHandler {
           res.end();
           return true;
         }
-        throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Use GET or DELETE.');
+        throw methodNotAllowed('GET, HEAD, DELETE');
       }
 
       const modelMatch = /^\/api\/models\/([^/]+)$/.exec(path);
       if (modelMatch) {
-        if (method !== 'GET') return false;
+        if (!isGetOrHead(method)) throw methodNotAllowed('GET, HEAD');
         const key = decodeURIComponent(modelMatch[1]);
-        if (!MODEL_KEY_RE.test(key)) {
+        // Strict key grammar: an unparseable key is a client error (400), not a
+        // "not generated yet" 404 that invites retries.
+        if (!isValidModelKey(key)) {
           throw new HttpError(400, 'INVALID_MODEL_KEY', 'Invalid model key.');
         }
         const model = await cityService.readModel(key);
@@ -230,32 +286,39 @@ export function createApiHandler(deps: ApiDependencies): ApiHandler {
           throw new HttpError(404, 'MODEL_NOT_READY', 'This city model is not ready yet.', { retryable: true });
         }
         // Models are stored pre-compressed; always serve the gzip payload.
+        const degraded = model.meta.degraded === true;
         const modelHeaders: Record<string, string> = {
           'Content-Type': 'application/json; charset=utf-8',
           'Content-Encoding': 'gzip',
           ETag: model.etag,
-          'Cache-Control': 'private, max-age=31536000, immutable',
+          'Cache-Control': degraded ? MODEL_CACHE_DEGRADED : MODEL_CACHE_IMMUTABLE,
           Vary: 'Accept-Encoding',
           'Content-Length': String(model.gzipped.length)
         };
+        if (degraded) modelHeaders['X-Model-Degraded'] = '1';
         if (String(req.headers['if-none-match'] || '') === model.etag) {
           res.writeHead(304, modelHeaders);
           res.end();
           return true;
         }
         res.writeHead(200, modelHeaders);
+        if (method === 'HEAD') {
+          res.end();
+          return true;
+        }
         res.end(model.gzipped);
         return true;
       }
 
       if (path === '/api/sky') {
-        if (method !== 'GET') return false;
+        if (!isGetOrHead(method)) throw methodNotAllowed('GET, HEAD');
         const lat = parseCoordinate(url.searchParams.get('lat'), 'lat', -90, 90);
         const lon = parseCoordinate(url.searchParams.get('lon'), 'lon', -180, 180);
         const date = (url.searchParams.get('date') || '').trim();
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
           throw new HttpError(400, 'INVALID_DATE', 'date must be YYYY-MM-DD.');
         }
+        enforce(skyLimiter, req, 'Too many sky requests. Try again in a minute.');
         const entry = skyCache.get(lat, lon, date);
         sendCachedJson(
           res,
@@ -278,3 +341,6 @@ export function createApiHandler(deps: ApiDependencies): ApiHandler {
 }
 
 export { CityError };
+
+/** Exported for tests that assert the exact cache profiles. */
+export { MODEL_CACHE_DEGRADED, MODEL_CACHE_IMMUTABLE };

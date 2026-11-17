@@ -57,6 +57,10 @@ export function createAboutDialog(ctx: UIContext, callbacks: AboutDialogCallback
         </section>
         <section class="sl-about-section">
           <h3>Keyboard</h3>
+          <p class="sl-about-note" data-testid="about-keyboard-note">
+            Space and Enter activate the focused control. Global shortcuts pause while a
+            control or text field has focus; Escape always closes the open panel or dialog.
+          </p>
           <dl class="sl-keys">
             ${SHORTCUT_TABLE.map((entry) => shortcutRow(entry.keys, entry.label)).join('')}
           </dl>
@@ -64,7 +68,8 @@ export function createAboutDialog(ctx: UIContext, callbacks: AboutDialogCallback
         <section class="sl-about-section">
           <h3>Data &amp; attribution</h3>
           <ul class="sl-attrib-list">
-            <li><strong>City geometry</strong> — ${OSM_ATTRIBUTION}. Buildings, roads, water, parks and rail are derived from OpenStreetMap data.</li>
+            <li><strong>City geometry</strong> — ${OSM_ATTRIBUTION}. Buildings, roads, water, parks and rail are derived from OpenStreetMap data. <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap copyright</a></li>
+            <li><strong>Map context</strong> — the optional 5 km overview in the Area panel loads raster tiles from <a href="https://tile.openstreetmap.org" target="_blank" rel="noopener noreferrer">tile.openstreetmap.org</a>; the diorama itself works without them.</li>
             <li><strong>Elevation</strong> — ${TERRAIN_ATTRIBUTION} (Mapzen terrain tiles, derived from SRTM and other public DEMs).</li>
             <li><strong>City index</strong> — ${GEONAMES_ATTRIBUTION}. Search covers populated places from the GeoNames cities5000 index.</li>
             <li><strong>Sun &amp; moon</strong> — altazimuth positions from standard astronomical ephemerides, sampled every five minutes of city-local wall-clock time.</li>
@@ -74,10 +79,20 @@ export function createAboutDialog(ctx: UIContext, callbacks: AboutDialogCallback
         </section>
         <section class="sl-about-section">
           <h3>Privacy</h3>
+          <p data-testid="about-privacy">
+            No accounts and no analytics. Your location is only requested when you press
+            <em>Locate</em>, and it is used once to find the nearest city.
+          </p>
+          <p data-testid="about-privacy-tiles">
+            Opening the <em>Area</em> panel requests PNG map tiles from
+            <a href="https://tile.openstreetmap.org" target="_blank" rel="noopener noreferrer">tile.openstreetmap.org</a>,
+            which shares your IP address and approximate area with OpenStreetMap. No tiles are
+            requested otherwise, and no other third-party requests are made.
+          </p>
           <p>
-            No accounts, no analytics and no third-party requests. Your location is only
-            requested when you press <em>Locate</em>, and it is used once to find the nearest
-            city. Deep links carry only the city, date and time.
+            Deep links carry the city, date and time; picking a custom area adds its centre
+            coordinates to the link. Sunlight is set in the city's IANA timezone with a
+            24-hour clock and metric distances.
           </p>
         </section>
       </div>

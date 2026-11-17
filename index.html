@@ -18,8 +18,13 @@
     <a class="skip-link" href="#ui">Skip to city controls</a>
     <main id="main">
     <div id="app">
-      <canvas id="scene" aria-label="Isometric city diorama with sunlight and shadows" role="img"></canvas>
-      <div id="ui"></div>
+      <canvas id="scene" tabindex="0" role="application" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown + -" aria-label="Interactive isometric city diorama with sunlight and shadows" aria-describedby="scene-help"></canvas>
+      <p id="scene-help" class="sl-sr-only">
+        City diorama. Use the city button to change place, the time console to scrub the
+        day, and the Area button to frame or rebuild a smaller square. All controls are
+        reachable with the Tab key; Space and Enter activate the focused control.
+      </p>
+      <div id="ui" tabindex="-1"></div>
       <div id="boot" aria-hidden="true">
         <div class="boot-sun"></div>
         <p>Waking the city…</p>

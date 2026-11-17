@@ -1,7 +1,19 @@
 /**
- * Fixed-window per-IP rate limiter for expensive endpoints.
- * A limit of 0 disables limiting.
+ * Fixed-window per-client rate limiter for expensive endpoints.
+ *
+ * A limit of 0 disables limiting. Rejections report the exact number of seconds
+ * until the window resets so the HTTP layer can emit a correct `Retry-After`.
  */
+
+export interface RateLimitResult {
+  allowed: boolean;
+  /** Requests still allowed in the current window (0 when rejected). */
+  remaining: number;
+  /** Seconds until the window resets; always >= 1 when rejected. */
+  retryAfterSec: number;
+  /** Effective per-minute limit (0 = disabled). */
+  limit: number;
+}
 
 export class FixedWindowRateLimiter {
   private readonly limit: number;
@@ -13,20 +25,45 @@ export class FixedWindowRateLimiter {
     this.windowMs = windowMs;
   }
 
-  /** Returns remaining allowance, or null when the request should be rejected. */
-  take(key: string, now = Date.now()): { remaining: number; retryAfterSec: number } | null {
-    if (this.limit === 0) return { remaining: Number.POSITIVE_INFINITY, retryAfterSec: 0 };
+  get perMinute(): number {
+    return this.limit;
+  }
+
+  take(key: string, now = Date.now()): RateLimitResult {
+    if (this.limit === 0) {
+      return { allowed: true, remaining: Number.POSITIVE_INFINITY, retryAfterSec: 0, limit: 0 };
+    }
     const bucket = this.buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       this.buckets.set(key, { count: 1, resetAt: now + this.windowMs });
       if (this.buckets.size > 5000) this.prune(now);
-      return { remaining: this.limit - 1, retryAfterSec: 0 };
+      return { allowed: true, remaining: this.limit - 1, retryAfterSec: 0, limit: this.limit };
     }
     if (bucket.count >= this.limit) {
-      return null;
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfterSec: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+        limit: this.limit
+      };
     }
     bucket.count += 1;
-    return { remaining: this.limit - bucket.count, retryAfterSec: 0 };
+    return {
+      allowed: true,
+      remaining: this.limit - bucket.count,
+      retryAfterSec: 0,
+      limit: this.limit
+    };
+  }
+
+  /** Test hook: drop all buckets. */
+  reset(): void {
+    this.buckets.clear();
+  }
+
+  /** Test/diagnostic hook: number of tracked client buckets. */
+  get tracked(): number {
+    return this.buckets.size;
   }
 
   private prune(now: number): void {
@@ -40,3 +77,6 @@ export class FixedWindowRateLimiter {
     }
   }
 }
+
+/** Shared numeric knobs keep the routes and the tests in sync. */
+export const RATE_LIMIT_WINDOW_MS = 60_000;

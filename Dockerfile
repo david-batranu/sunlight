@@ -5,6 +5,8 @@ WORKDIR /app
 ENV npm_config_cache=/tmp/npm-cache
 # Relative asset base keeps the image portable across root and subpath deployments.
 ARG VITE_BASE=./
+ARG GIT_SHA=""
+ARG IMAGE_TAG=""
 ENV VITE_BASE=$VITE_BASE
 
 COPY package.json package-lock.json ./
@@ -21,10 +23,14 @@ COPY tests ./tests
 RUN npm run build
 
 FROM node:24-bookworm-slim AS runtime
+ARG GIT_SHA=""
+ARG IMAGE_TAG=""
 ENV NODE_ENV=production \
     PORT=8090 \
     HOST=0.0.0.0 \
-    CACHE_DIR=/data/cache
+    CACHE_DIR=/data/cache \
+    GIT_SHA=$GIT_SHA \
+    IMAGE_TAG=$IMAGE_TAG
 
 WORKDIR /app
 COPY --from=build --chown=node:node /app/dist ./dist

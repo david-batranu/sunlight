@@ -190,6 +190,38 @@ export function trapFocus(event: KeyboardEvent, container: HTMLElement): void {
   }
 }
 
+/** Focus an element without scrolling the page/panel. */
+export function focusEl(target: HTMLElement | null | undefined): boolean {
+  if (!target || !target.isConnected) return false;
+  try {
+    target.focus({ preventScroll: true });
+  } catch {
+    target.focus();
+  }
+  return document.activeElement === target;
+}
+
+/** First focusable descendant, or the container itself when it is focusable. */
+export function firstFocusable(container: HTMLElement): HTMLElement | null {
+  const list = focusablesWithin(container);
+  return list.length > 0 ? list[0] : null;
+}
+
+/**
+ * True when focus currently sits on the document body (or nowhere), i.e. the
+ * user is in the "canvas context" where global shortcuts are allowed to fire.
+ */
+export function isBodyFocus(): boolean {
+  const active = document.activeElement;
+  return !active || active === document.body || active === document.documentElement;
+}
+
+/** Sets/clears the native `inert` attribute. */
+export function setInert(element: HTMLElement | null | undefined, inert: boolean): void {
+  if (!element) return;
+  element.inert = inert;
+}
+
 export function prefersReducedMotion(): boolean {
   try {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;

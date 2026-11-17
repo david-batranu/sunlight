@@ -29,7 +29,7 @@ import {
   sourceLabel
 } from './format.ts';
 import type { Mood } from './format.ts';
-import { createPatcher, el, on, q } from './dom.ts';
+import { createPatcher, el, focusEl, on, q, trapFocus } from './dom.ts';
 import { icon, moonPhaseIcon } from './icons.ts';
 
 export interface LightPanelCallbacks {
@@ -124,7 +124,8 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
         <span class="sl-light-label" data-testid="light-label">—</span>
       </div>
       <button class="sl-icon-btn sl-light-collapse" type="button" data-testid="light-collapse" aria-expanded="true" aria-controls="sl-light-body" aria-label="Collapse the light panel">
-        ${icon('chevron')}
+        <span class="sl-light-collapse-chevron">${icon('chevron')}</span>
+        <span class="sl-light-collapse-x">${icon('close')}</span>
       </button>
     </header>
     <div class="sl-light-body" id="sl-light-body">
@@ -155,6 +156,15 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
       <footer class="sl-light-foot">
         <p class="sl-model-line" data-testid="model-meta">No model loaded yet.</p>
         <p class="sl-model-source" data-testid="model-source"></p>
+        <button class="sl-named-toggle" type="button" data-testid="named-toggle" aria-expanded="false" aria-controls="sl-named-panel">
+          Named places <span class="sl-named-count" data-testid="named-count">0</span>
+        </button>
+        <div class="sl-named-panel" id="sl-named-panel" data-testid="named-panel" hidden>
+          <label class="sl-sr-only" for="sl-named-filter">Filter named places</label>
+          <input class="sl-named-filter" id="sl-named-filter" data-testid="named-filter" type="search" placeholder="Filter named places…" autocomplete="off" />
+          <p class="sl-named-note" data-testid="named-note">Names from the loaded model, readable without the map.</p>
+          <ul class="sl-named-list" data-testid="named-list"></ul>
+        </div>
       </footer>
     </div>
     <div class="sl-light-foot-actions">
@@ -189,6 +199,15 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
   const moonText = q<HTMLElement>(moonPhase, '.sl-moon-phase-text');
   const modelMeta = q<HTMLElement>(element, '[data-testid="model-meta"]');
   const modelSource = q<HTMLElement>(element, '[data-testid="model-source"]');
+  const namedToggle = q<HTMLButtonElement>(element, '[data-testid="named-toggle"]');
+  const namedCount = q<HTMLElement>(element, '[data-testid="named-count"]');
+  const namedPanel = q<HTMLElement>(element, '[data-testid="named-panel"]');
+  const namedFilter = q<HTMLInputElement>(element, '[data-testid="named-filter"]');
+  const namedNote = q<HTMLElement>(element, '[data-testid="named-note"]');
+  const namedList = q<HTMLElement>(element, '[data-testid="named-list"]');
+  let namedOpen = false;
+  let namedModelKey: string | null = null;
+  let namedEntries: Array<{ name: string; kind: string; detail: string }> = [];
   const readout = (id: string): HTMLElement => q<HTMLElement>(element, `[data-testid="${id}"]`);
 
   const shadowLabel = ((): HTMLElement | null => {
@@ -221,23 +240,69 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
 
   let open = !compactQuery.matches;
   let collapsed = compactQuery.matches;
+  let previousFocus: HTMLElement | null = null;
+  let sheetWasOpen = false;
 
   function isPhone(): boolean {
     return phoneQuery.matches;
   }
 
+  function isSheetOpen(): boolean {
+    return isPhone() && open && !collapsed;
+  }
+
+  function restoreSheetFocus(): void {
+    const target =
+      previousFocus && previousFocus.isConnected
+        ? previousFocus
+        : element.ownerDocument.querySelector<HTMLElement>('[data-testid="light-toggle"]');
+    previousFocus = null;
+    focusEl(target);
+  }
+
   function syncAttributes(): void {
+    const phone = isPhone();
+    const sheetOpen = isSheetOpen();
     element.dataset.open = open ? 'true' : 'false';
     element.dataset.collapsed = collapsed ? 'true' : 'false';
-    scrim.hidden = !(isPhone() && open);
+    scrim.hidden = !(phone && open);
     patcher.attr(collapseButton, 'aria-expanded', collapsed ? 'false' : 'true');
     patcher.attr(
       collapseButton,
       'aria-label',
-      collapsed ? 'Expand the light panel' : 'Collapse the light panel'
+      phone
+        ? open
+          ? 'Close sun and moon details'
+          : 'Open sun and moon details'
+        : collapsed
+          ? 'Expand the light panel'
+          : 'Collapse the light panel'
+    );
+    patcher.attr(
+      collapseButton,
+      'title',
+      phone ? (open ? 'Close' : 'Open') : collapsed ? 'Expand' : 'Collapse'
     );
     patcher.cls(collapseButton, 'is-collapsed', collapsed);
-    callbacks.onOpenChange(open && !collapsed);
+    // The phone sheet is a modal dialog over the whole UI; the desktop panel is
+    // a plain complementary region.
+    if (phone) {
+      element.setAttribute('role', 'dialog');
+      element.setAttribute('aria-modal', sheetOpen ? 'true' : 'false');
+    } else {
+      element.removeAttribute('role');
+      element.removeAttribute('aria-modal');
+    }
+    if (sheetOpen && !sheetWasOpen) {
+      previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      window.setTimeout(() => {
+        if (isSheetOpen()) focusEl(collapseButton);
+      }, 0);
+    } else if (!sheetOpen && sheetWasOpen && phone) {
+      restoreSheetFocus();
+    }
+    sheetWasOpen = sheetOpen;
+    callbacks.onOpenChange(open);
   }
 
   function resetForViewport(): void {
@@ -272,8 +337,101 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
     on(closePhoneButton, 'click', () => {
       open = false;
       syncAttributes();
+    }),
+    on(namedToggle, 'click', () => toggleNamedPlaces()),
+    on(namedFilter, 'input', () => renderNamedPlaces()),
+    on(element, 'keydown', (event) => {
+      if (!isSheetOpen()) return;
+      const keyboard = event as KeyboardEvent;
+      if (keyboard.key === 'Escape') {
+        keyboard.preventDefault();
+        keyboard.stopPropagation();
+        open = false;
+        syncAttributes();
+        return;
+      }
+      trapFocus(keyboard, element);
     })
   ];
+
+  function roadKindLabel(c: number): string {
+    switch (c) {
+      case 1: return 'Main street';
+      case 2: return 'Primary street';
+      case 3: return 'Street';
+      case 4: return 'Local street';
+      case 5: return 'Hiking trail';
+      case 9: return 'Railway';
+      default: return 'Street';
+    }
+  }
+
+  function areaKindLabel(k: number): string {
+    switch (k) {
+      case 1: return 'Water';
+      case 2: return 'Park';
+      case 3: return 'Forest';
+      default: return 'Green space';
+    }
+  }
+
+  function collectNamedPlaces(state: AppState): Array<{ name: string; kind: string; detail: string }> {
+    const model = state.model;
+    if (!model) return [];
+    const entries: Array<{ name: string; kind: string; detail: string }> = [];
+    for (const building of model.buildings ?? []) {
+      if (!building.n) continue;
+      entries.push({
+        name: building.n,
+        kind: building.k ?? 'Building',
+        detail: `${Math.round(building.h / 10)} m tall`
+      });
+    }
+    for (const road of model.roads ?? []) {
+      if (!road.n) continue;
+      entries.push({ name: road.n, kind: roadKindLabel(road.c), detail: '' });
+    }
+    for (const area of model.areas ?? []) {
+      if (!area.n) continue;
+      entries.push({ name: area.n, kind: areaKindLabel(area.k), detail: '' });
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    return entries;
+  }
+
+  function renderNamedPlaces(): void {
+    const query = namedFilter.value.trim().toLocaleLowerCase();
+    const filtered = query
+      ? namedEntries.filter((entry) => `${entry.name} ${entry.kind}`.toLocaleLowerCase().includes(query))
+      : namedEntries;
+    const shown = filtered.slice(0, 200);
+    namedList.replaceChildren();
+    for (const entry of shown) {
+      const item = document.createElement('li');
+      const name = document.createElement('strong');
+      name.textContent = entry.name;
+      const kind = document.createElement('span');
+      kind.textContent = entry.detail ? `${entry.kind} · ${entry.detail}` : entry.kind;
+      item.append(name, kind);
+      namedList.append(item);
+    }
+    namedNote.textContent =
+      filtered.length > shown.length
+        ? `Showing ${shown.length} of ${filtered.length} named places. Use the filter to narrow the list.`
+        : filtered.length === 0
+          ? 'No named places match this filter.'
+          : `${filtered.length} named place${filtered.length === 1 ? '' : 's'} in this model.`;
+  }
+
+  function toggleNamedPlaces(): void {
+    namedOpen = !namedOpen;
+    namedPanel.hidden = !namedOpen;
+    namedToggle.setAttribute('aria-expanded', String(namedOpen));
+    if (namedOpen) {
+      namedFilter.focus();
+      renderNamedPlaces();
+    }
+  }
 
   /* ---------------------------------------------------------------- */
   /* Fonts of truth                                                    */
@@ -424,6 +582,14 @@ export function createLightPanel(callbacks: LightPanelCallbacks): LightPanelHand
       patcher.cls(sunHalo, 'is-hidden', true);
       patcher.cls(moonDot, 'is-hidden', true);
       patcher.cls(axis, 'is-hidden', true);
+    }
+
+    // Accessible named-place list: an alternative to pointer-only map tooltips.
+    if (state.model?.key !== namedModelKey) {
+      namedModelKey = state.model?.key ?? null;
+      namedEntries = collectNamedPlaces(state);
+      namedCount.textContent = String(namedEntries.length);
+      if (namedOpen) renderNamedPlaces();
     }
 
     // Model footer.
