@@ -142,41 +142,6 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     flatShading: true
   });
 
-  /** Detail-window mask: full colour inside, muted context outside. */
-  const detailUniforms = {
-    uDetailEnabled: { value: 0 },
-    uDetailCenter: { value: new THREE.Vector2(0, 0) },
-    uDetailHalf: { value: new THREE.Vector2(0, 0) }
-  };
-  material.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, detailUniforms);
-    shader.vertexShader = shader.vertexShader
-      .replace(
-        '#include <common>',
-        '#include <common>\nvarying vec3 vDetailWorld;'
-      )
-      .replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\nvDetailWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;'
-      );
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        '#include <common>',
-        '#include <common>\nuniform float uDetailEnabled;\nuniform vec2 uDetailCenter;\nuniform vec2 uDetailHalf;\nvarying vec3 vDetailWorld;'
-      )
-      .replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-        if (uDetailEnabled > 0.5) {
-          vec2 detailDelta = abs(vDetailWorld.xz - uDetailCenter) - uDetailHalf;
-          float detailOutside = smoothstep(-1.0, 8.0, max(detailDelta.x, detailDelta.y));
-          float detailLuma = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-          vec3 detailMuted = mix(vec3(detailLuma), diffuseColor.rgb, 0.22) * 0.64;
-          diffuseColor.rgb = mix(detailMuted, diffuseColor.rgb, 1.0 - detailOutside);
-        }`
-      );
-  };
-
   /* ---------------------------------------------------------------- */
   /* Lights                                                            */
   /* ---------------------------------------------------------------- */
@@ -237,7 +202,6 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let areasMesh: THREE.Mesh | null = null;
   let modelKey: string | null = null;
   let currentModel: CityModel | null = null;
-  let detailWindow: DetailWindow | null = null;
   let disposed = false;
 
   /**
@@ -730,28 +694,10 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     applyLightingIfNeeded(true);
   }
 
-  function setDetailWindow(nextDetailWindow: DetailWindow | null): void {
-    if (disposed) return;
-    const previous = detailWindow;
-    const unchanged =
-      previous === null && nextDetailWindow === null
-        ? true
-        : previous !== null &&
-          nextDetailWindow !== null &&
-          previous.centerX === nextDetailWindow.centerX &&
-          previous.centerZ === nextDetailWindow.centerZ &&
-          previous.radiusM === nextDetailWindow.radiusM;
-    if (unchanged) return;
-    detailWindow = nextDetailWindow;
-    if (nextDetailWindow) {
-      detailUniforms.uDetailEnabled.value = 1;
-      detailUniforms.uDetailCenter.value.set(nextDetailWindow.centerX, nextDetailWindow.centerZ);
-      detailUniforms.uDetailHalf.value.set(nextDetailWindow.radiusM, nextDetailWindow.radiusM);
-    } else {
-      detailUniforms.uDetailEnabled.value = 0;
-    }
-    // Uniform-only change: redraw the frame, but the shadow rig is unaffected.
-    needsRender = true;
+  function setDetailWindow(_next: DetailWindow | null): void {
+    // Selection lives in the picker/store; the 3D scene only reacts to explicit
+    // Focus actions, which frame the chosen square. Nothing in the rendered
+    // city is muted or discarded outside it.
   }
 
   function focusDetailWindow(window: DetailWindow): void {

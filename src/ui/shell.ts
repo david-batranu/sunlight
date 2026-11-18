@@ -167,6 +167,7 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     tooltip.element,
   ];
   let lastInert: InertMode = 'none';
+  let wasAreaOpen = false;
 
   function applyInert(state: AppState): void {
     const overlayOpen = progress.isOpen() || errorCard.isOpen();
@@ -331,6 +332,13 @@ export function createUI(root: HTMLElement, ctx: UIContext): UIHandle {
     app.dataset.playing = state.playing ? 'true' : 'false';
     app.dataset.loading = state.phase === 'ready' ? 'false' : 'true';
     const panelOpen = state.detailPanelOpen;
+    if (wasAreaOpen && !panelOpen) {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && detailMinimap.element.contains(active)) {
+        topbar.focusAreaButton();
+      }
+    }
+    wasAreaOpen = panelOpen;
     gestureHint.hidden = !(coarsePointer && !gestureDismissed && state.phase === 'ready' && !panelOpen);
     app.dataset.area = panelOpen ? 'open' : 'closed';
     app.dataset.areaMode = areaPanelMode(window.innerWidth, window.innerHeight);

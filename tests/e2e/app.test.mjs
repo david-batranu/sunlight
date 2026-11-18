@@ -438,12 +438,21 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
     const openedZoom = await page.evaluate(() => window.__sunlight.getSceneDebug().camera.zoom);
     assert.equal(openedZoom, 1, 'opening the area picker should keep the wide context view');
 
-    // Focus at the default 750m window must zoom in, not out (UX P1-5).
+    // Focus at the default 750m window must zoom in like a close-up, close the
+    // picker out of the way, and keep the selection for reopening (UX P1-5).
     await page.locator('[data-testid="detail-focus"]').click();
-    await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom > 1, null, {
-      timeout: 5000
-    });
-    // Return to the wide view for the resize/Focus sequence.
+    await page.waitForFunction(
+      () => window.__sunlight.getSceneDebug().camera.zoom > 1.5,
+      null,
+      { timeout: 5000 }
+    );
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === false);
+    assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), false);
+    const defaultFocusZoom = await page.evaluate(() => window.__sunlight.getSceneDebug().camera.zoom);
+
+    // Reopen the picker and return to the wide view for the resize/Focus sequence.
+    await page.locator('[data-testid="area-pick"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
     await page.locator('[data-testid="reset-camera"]').click();
     await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom === 1, null, {
       timeout: 5000
@@ -462,13 +471,22 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
       'resizing must not move the camera before Focus'
     );
     await page.locator('[data-testid="detail-focus"]').click();
-    await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom > 1.1, null, {
-      timeout: 5000
-    });
+    await page.waitForFunction(
+      () => window.__sunlight.getState().detailPanelOpen === false,
+      null,
+      { timeout: 5000 }
+    );
+    await page.waitForFunction(
+      (wide) => window.__sunlight.getSceneDebug().camera.zoom > wide,
+      defaultFocusZoom,
+      { timeout: 5000 }
+    );
     const resized = await readState(page);
     assert.equal(resized.detailWindow?.radiusM, 300);
 
-    // Drag the minimap frame, which updates the window without an API reload.
+    // Reopen the minimap and drag the frame without an API reload.
+    await page.locator('[data-testid="area-pick"]').click();
+    await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
     const canvas = page.locator('[data-testid="detail-canvas"]');
     const box = await canvas.boundingBox();
     assert.ok(box);

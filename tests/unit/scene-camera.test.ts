@@ -267,6 +267,10 @@ test('detailFocusZoom never zooms out below the model-fit view', () => {
   const defaultWindowZoom = detailFocusZoom(halfHeight, extents.radius, 750);
   assert.ok(defaultWindowZoom >= 1, `default window zoom ${defaultWindowZoom} must be >= 1`);
   assert.ok(
+    defaultWindowZoom > 1.5,
+    `default 750 m window must fill the viewport like a focus shot (${defaultWindowZoom})`
+  );
+  assert.ok(
     defaultWindowZoom > oldZoom,
     `new zoom ${defaultWindowZoom} must beat the old ${oldZoom}`
   );

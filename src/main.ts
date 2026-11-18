@@ -752,6 +752,9 @@ const actions: AppActions = {
     if (!window) return;
     scene.setDetailWindow(window);
     scene.focusDetailWindow(window);
+    // Take the picker out of the way so the user sees the framed square. Keep
+    // detailWindow in the store so reopening Area resumes the same selection.
+    store.setState({ detailPanelOpen: false });
   },
 
   loadDetailArea() {
@@ -764,7 +767,7 @@ const actions: AppActions = {
     // same data again would only cost time. Focus is the correct action there.
     if (detailWindowInsideModel(state.detailWindow, frame)) {
       actions.focusDetailWindow();
-      addNotice('That area is already loaded — Focus frames it without rebuilding.');
+      addNotice('That area is already loaded — Focus zooms to it without rebuilding.');
       return;
     }
     const geo = detailWindowToGeo(state.city, state.detailWindow);

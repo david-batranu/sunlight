@@ -50,8 +50,9 @@ test('load/focus explanations flip with the loaded-model context', () => {
   assert.match(loadAreaTitle(true), /already inside the loaded city/);
   assert.match(loadAreaTitle(true), /Focus/);
   assert.match(loadAreaTitle(false), /Build/);
-  assert.match(focusAreaTitle(true), /Frame/);
+  assert.match(focusAreaTitle(true), /zoom/);
   assert.match(focusAreaTitle(false), /Load area/);
-  assert.match(AREA_HELP_TEXT, /Focus frames the square/);
+  assert.match(AREA_HELP_TEXT, /Focus closes this panel/);
+  assert.match(AREA_HELP_TEXT, /zooms the 3D view/);
   assert.match(AREA_HELP_TEXT, /Load area rebuilds the city/);
 });

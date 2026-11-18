@@ -61,7 +61,7 @@ export function areaStatusText(inside: boolean): string {
 
 /** Plain-language help under the panel title. */
 export const AREA_HELP_TEXT =
-  'Focus frames the square; Load area rebuilds the city here. Drag or use arrows; Alt+arrows move in fine 1% steps.';
+  'Focus closes this panel and zooms the 3D view to the square; Load area rebuilds the city here. Drag or use arrows; Alt+arrows move in fine 1% steps.';
 
 /** Canvas accessible name, including radius/footprint and what keys do. */
 export function areaCanvasLabel(radiusM: number, inside: boolean): string {
@@ -82,7 +82,7 @@ export function loadAreaTitle(inside: boolean): string {
 /** Explains why "Focus" is unavailable while the window is outside the model. */
 export function focusAreaTitle(inside: boolean): string {
   return inside
-    ? 'Frame this window in the 3D view'
+    ? 'Close the picker and zoom the 3D view to this square'
     : 'Focus is only available inside the loaded city — use Load area first';
 }
 
@@ -302,7 +302,7 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
       <span class="sl-minimap-footprint" data-testid="detail-footprint">—</span>
     </label>
     <div class="sl-minimap-actions">
-      <button class="sl-btn sl-btn--primary" type="button" data-testid="detail-focus" title="Frame this window in the 3D view">${icon('compass')}<span>Focus</span></button>
+      <button class="sl-btn sl-btn--primary" type="button" data-testid="detail-focus" title="Close the picker and zoom the 3D view to this square">${icon('compass')}<span>Focus</span></button>
       <button class="sl-btn" type="button" data-testid="detail-load" aria-describedby="sl-area-status">${icon('locate')}<span>Load area</span></button>
     </div>
     <p class="sl-minimap-attrib">Map context © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a></p>

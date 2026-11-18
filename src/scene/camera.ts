@@ -186,16 +186,17 @@ export function fitTargetY(extents: ModelExtents, bottomY: number): number {
 /* ------------------------------------------------------------------ */
 
 /**
- * Context shown around a focused detail window: the view is
- * `DETAIL_CONTEXT_FACTOR ×` the window's diameter tall, so the selection plus
- * a ring of surrounding model stays visible.
+ * Breathing room around a focused detail window: the view is
+ * `DETAIL_CONTEXT_FACTOR ×` the window's diameter tall. A small margin keeps
+ * the selection from touching the edges without turning the surrounding city
+ * into the subject of the shot.
  */
-export const DETAIL_CONTEXT_FACTOR = 1.8;
+export const DETAIL_CONTEXT_FACTOR = 1.06;
 /**
  * A focused view is capped at this fraction of the model diameter. It prevents
  * "Focus" on a huge window from pulling the camera out to empty space.
  */
-export const DETAIL_MODEL_HEIGHT_FRACTION = 0.95;
+export const DETAIL_MODEL_HEIGHT_FRACTION = 1;
 
 /**
  * Zoom that frames a detail window with context.
@@ -207,7 +208,9 @@ export const DETAIL_MODEL_HEIGHT_FRACTION = 0.95;
  * factor and {@link DETAIL_MODEL_HEIGHT_FRACTION} of the model diameter. The
  * result is always at least zoom 1 — focusing a window that is already visible
  * in (or larger than) the model-fit view must never zoom *out* and expose the
- * empty space around the diorama.
+ * empty space around the diorama. Within that bound, the zoom changes with the
+ * selected window size: small windows fill the viewport like a close-up, large
+ * windows show the whole city.
  */
 export function detailFocusZoom(
   fitHalfHeightWorld: number,
