@@ -656,7 +656,11 @@ test('overview map pans and zooms, and keyboard navigation works on the diorama'
     const scale0 = await page.locator('[data-testid="detail-map-scale"]').innerText();
     await page.locator('[data-testid="detail-map-zoom-in"]').click();
     await page.locator('[data-testid="detail-map-zoom-in"]').click();
-    await page.waitForTimeout(400);
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="detail-canvas"]')?.dataset.mapZoom === '4',
+      null,
+      { timeout: 5000 }
+    );
     const scale1 = await page.locator('[data-testid="detail-map-scale"]').innerText();
     assert.notEqual(scale1, scale0, 'map zoom must change the scale label');
     assert.match(scale1, /radius/);
@@ -667,11 +671,10 @@ test('overview map pans and zooms, and keyboard navigation works on the diorama'
     );
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.wheel(0, -120);
-    await page.waitForTimeout(300);
-    assert.equal(
-      await page.locator('[data-testid="detail-canvas"]').getAttribute('data-map-zoom'),
-      '8',
-      'the mouse wheel should zoom the overview map'
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="detail-canvas"]')?.dataset.mapZoom === '8',
+      null,
+      { timeout: 5000 }
     );
     await page.keyboard.press('Escape');
 
