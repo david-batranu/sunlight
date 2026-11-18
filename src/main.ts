@@ -253,13 +253,15 @@ function addNotice(message: string): void {
 /** Teaches the click-to-load context map once per browser. */
 function maybeShowMapHint(): void {
   try {
-    if (window.localStorage.getItem('sunlight.contextMapHintSeen') === '1') return;
-    window.localStorage.setItem('sunlight.contextMapHintSeen', '1');
+    if (window.localStorage.getItem('sunlight.contextMapHintSeen.v2') === '1') return;
+    window.localStorage.setItem('sunlight.contextMapHintSeen.v2', '1');
   } catch {
     /* storage may be unavailable; don't nag every load */
     return;
   }
-  addNotice('Drag to pan the map. Click the low-quality map outside the city to load that area.');
+  addNotice(
+    'Drag to pan. Orange dots are cached areas — click one to reopen it, or click elsewhere to load that area.'
+  );
 }
 
 function hideBoot(): void {

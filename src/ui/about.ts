@@ -92,7 +92,7 @@ export function createAboutDialog(ctx: UIContext, callbacks: AboutDialogCallback
           </p>
           <p data-testid="about-privacy-cache">
             On a shared deployment, generated custom areas are cached server-side. Their
-            approximate centres appear as anonymous footprints on the context map so any
+            approximate centres appear as anonymous orange markers on the context map so any
             visitor can reopen a cached area instead of generating a near-duplicate. No
             account, name or personal profile is stored with them.
           </p>

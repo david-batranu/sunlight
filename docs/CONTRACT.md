@@ -233,7 +233,7 @@ fits the camera; and `loadDetailArea()` recentres/generates a new 3 km model at
 the window centre. `SceneHandle.setDetailWindow()` records the picker selection;
 `SceneHandle.focusDetailWindow()` crops the rendered city to the square and
 frames it (snapping under reduced motion). `getMapPoint()` resolves clicks on the low-quality OSM context plane,
-`setCachedAreas()` draws cached point-model footprints, and clicking one opens
+`setCachedAreas()` draws cached point-model markers, and clicking one opens
 the exact cached key.
 `panBy()`/`zoomBy()` power keyboard navigation, and `renderNow()` lets
 tests force a readback frame while on-demand rendering is settled. Model-space window

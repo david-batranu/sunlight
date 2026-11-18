@@ -758,43 +758,22 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     for (const area of areas) {
       if (area.current) continue;
       const center = toCanvas(area.centerX, area.centerZ);
-      const radiusPx = (area.radiusM / CONTEXT_MAP_SIZE_M) * canvasSize;
-      if (
-        center.px + radiusPx < 0 ||
-        center.px - radiusPx > canvasSize ||
-        center.py + radiusPx < 0 ||
-        center.py - radiusPx > canvasSize
-      ) {
+      if (center.px < 0 || center.px > canvasSize || center.py < 0 || center.py > canvasSize) {
         continue;
       }
-      context.fillStyle = 'rgba(212, 95, 50, 0.11)';
-      context.strokeStyle = 'rgba(196, 87, 47, 0.85)';
-      context.lineWidth = 2;
+      context.fillStyle = 'rgba(212, 95, 50, 0.2)';
       context.beginPath();
-      context.rect(center.px - radiusPx, center.py - radiusPx, radiusPx * 2, radiusPx * 2);
+      context.arc(center.px, center.py, 22, 0, Math.PI * 2);
       context.fill();
-      context.stroke();
       context.fillStyle = '#d45f32';
       context.beginPath();
-      context.arc(center.px, center.py, 6, 0, Math.PI * 2);
+      context.arc(center.px, center.py, 9, 0, Math.PI * 2);
       context.fill();
-
-      const text = `Cached · ${area.name}`;
-      context.font = '600 9px system-ui, sans-serif';
-      const textWidth = Math.min(230, context.measureText(text).width + 14);
-      const textX = Math.max(4, Math.min(canvasSize - textWidth - 4, center.px - textWidth / 2));
-      const textY = Math.max(4, Math.min(canvasSize - 22, center.py - 18));
-      context.fillStyle = 'rgba(255, 248, 232, 0.94)';
-      context.strokeStyle = 'rgba(176, 84, 45, 0.8)';
-      context.lineWidth = 1;
+      context.strokeStyle = 'rgba(255, 248, 232, 0.95)';
+      context.lineWidth = 2.5;
       context.beginPath();
-      context.roundRect(textX, textY, textWidth, 16, 4);
-      context.fill();
+      context.arc(center.px, center.py, 9, 0, Math.PI * 2);
       context.stroke();
-      context.fillStyle = '#5d3a24';
-      context.textAlign = 'center';
-      context.textBaseline = 'middle';
-      context.fillText(text, textX + textWidth / 2, textY + 8, textWidth - 6);
       drawn += 1;
     }
     if (drawn === 0) {

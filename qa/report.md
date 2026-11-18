@@ -44,8 +44,8 @@ Measured E2E (1440×900, SwiftShader): last frame **26 draw calls / 439,469 tria
 - Keyboard diorama navigation: focus `#scene`, arrows pan (Shift larger), `+`/`-` zoom.
 - Filterable **Named places** list in the light panel is an accessible alternative to pointer-only tooltips; pinned tooltips no longer auto-hide.
 - Primary action contrast ≥4.5:1; micro-labels raised to 11 px where feasible; 44 px coarse-pointer targets.
-- Persistent OSM attribution in the time console/Area picker; the main view loads low-resolution OSM context tiles and the About privacy copy discloses both the context and Area tile requests plus coordinate deep links. Cached point areas are listed through a bounded nearby query and shown as anonymous footprints.
-- Cached custom areas are reused by exact cache key from the context-map footprints; a fixture-server test verifies that clicking a listed footprint issues no POST/generation and opens the cached key.
+- Persistent OSM attribution in the time console/Area picker; the main view loads low-resolution OSM context tiles and the About privacy copy discloses both the context and Area tile requests plus coordinate deep links. Cached point areas are listed through a bounded nearby query and shown as anonymous orange map dots.
+- Cached custom areas are reused by exact cache key from the context-map dots; a fixture-server test verifies that clicking a listed footprint issues no POST/generation and opens the cached key.
 - Notices auto-dismiss with hover/focus pause; raw error codes are behind “Technical details”.
 
 ### Recent E2E checks added
@@ -61,7 +61,7 @@ Measured E2E (1440×900, SwiftShader): last frame **26 draw calls / 439,469 tria
 
 - `brasov-noon.png`, `brasov-golden.png`, `brasov-night.png`, `brasov-mobile.png`
 - `detail-area.png` (offline E2E fallback; production also loads OSM context tiles)
-- `docs/screenshots/cached-areas.webp` shows the optional cached custom-area footprints (captured against the fixture cache).
+- `docs/screenshots/cached-areas.webp` shows the optional cached custom-area markers (captured against the fixture cache).
 - `feature-tooltip.png`
 
 ## Known limitations / remaining work
