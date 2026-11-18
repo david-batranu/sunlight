@@ -90,6 +90,12 @@ export function createAboutDialog(ctx: UIContext, callbacks: AboutDialogCallback
             share your IP address and approximate area with OpenStreetMap. No other third-party
             requests are made.
           </p>
+          <p data-testid="about-privacy-cache">
+            On a shared deployment, generated custom areas are cached server-side. Their
+            approximate centres appear as anonymous footprints on the context map so any
+            visitor can reopen a cached area instead of generating a near-duplicate. No
+            account, name or personal profile is stored with them.
+          </p>
           <p>
             Deep links carry the city, date and time; picking a custom area adds its centre
             coordinates to the link. Sunlight is set in the city's IANA timezone with a

@@ -9,6 +9,7 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 - **Any city** — search a bundled index of ~65,000 populated places, or let the browser locate the nearest one. A custom “my exact location” point is supported too.
 - **Explore wider** — each city model covers a 3 km × 3 km core by default, surrounded by a low-quality OSM map context. Drag to pan the 3D view and **click the surrounding map** to load a high-detail city there, or use the **Area** picker's **5 km-radius overview** for precise placement. Switching cities always starts at that city’s current local date and time.
 - **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height, or browse the filterable **Named places** list. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **NW-up** and you can zoom from the whole city down to a few blocks (**0.45×–32×**).
+- **Revisit generated areas** — every previously cached custom point model is drawn as a named footprint on the low-quality context map. Clicking that footprint reopens the exact cached model instead of generating a near-duplicate at slightly different coordinates.
 - **Focus without reloading** — the **Area** picker shows a larger 5 km-radius overview with surrounding OSM map context (drag to pan, scroll/pinch or buttons to zoom, down to a 625 m radius), plus a draggable high-quality window from **100 m to 1500 m radius**. Inside the loaded city, moving or resizing it is instant and makes no OSM data requests; **Focus** closes the picker, crops the rendered diorama to the square, and frames it — the rest of the city is no longer drawn or grayed out. The window size maps directly to the rendered extent (100 m is a close-up tile, 1500 m is the whole city). **Load area** builds a fresh high-detail model where you point, combining area selection and detail in one tool. Named places are also readable as a filterable list in the light panel for keyboard/screen-reader users.
 - **Real geometry & elevation** — the server fetches OpenStreetMap building footprints, major/local roads, water, parks, hiking trails and railways, then samples public elevation tiles so hills, river valleys and mountains such as Brașov's Tâmpa shape the diorama instead of rendering as flat parks. The result is a compact low-poly model of a 3 km × 3 km city core with names and landmark metadata baked in. Terrain is baked into the seed models and cached with live models; if an elevation source is unreachable the model gracefully falls back to flat ground.
 - **Real light** — solar and lunar altitude/azimuth computed with `astronomy-engine`; real-time sun and moon shadows on the model, twilight transitions, moon phase brightness and polar day/night handling.
@@ -34,6 +35,9 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 
 ![Low-quality context map](docs/screenshots/context-map.webp)
 *The high-detail city sits on a deliberately coarse OSM context map. Drag the 3D view to pan; click outside the sharp tile to load that area as a new high-detail model.*
+
+![Cached custom areas](docs/screenshots/cached-areas.webp)
+*Previously generated custom areas appear as cached footprints. Clicking one reopens that exact cached model instead of regenerating a near-duplicate for a slightly different click.*
 
 ![Area picker](docs/screenshots/area-overview.webp)
 *Choose from a 5 km-radius overview: drag the map to pan, scroll/pinch or use the buttons to zoom, and move the draggable window over the area you want. Moving it costs no OSM data requests.*
@@ -237,7 +241,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 421 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 422 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
 
 ## Project layout
 

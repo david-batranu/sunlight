@@ -1,15 +1,15 @@
 # Sunlight QA report
 
-**Date:** 2026-11-18 · **Version:** 0.2.3
+**Date:** 2026-11-18 · **Version:** 0.2.4
 **Environment:** macOS arm64 (Apple M4 Pro), Node v26.13.1, Chrome headless + SwiftShader for E2E.
-**Result:** GREEN — **421/421** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
+**Result:** GREEN — **422/422** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
 
 ## Commands
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | pass (web + server + tests) |
-| `npm test` | **421/421** pass, offline fixtures, ~12 s |
+| `npm test` | **422/422** pass, offline fixtures, ~12 s |
 | `npm run build` | pass; SPA JS ~687 kB raw / ~184 kB gzip, CSS ~53 kB / ~11 kB gzip |
 | `npm run test:e2e` | **29/29** pass, ~76 s, seed-only server, isolated cache, external browser traffic blocked |
 | `docker compose config` | pass (compose v2; read-only container, cache volume, hardened options) |
@@ -38,13 +38,14 @@ Measured E2E (1440×900, SwiftShader): last frame **26 draw calls / 439,469 tria
 ### Usability / accessibility
 - Area picker now becomes a modal sheet at ≤1180 px wide or ≤620 px tall, so the time console cannot cover it; map is 1:1 and unclipped at 320–430 px widths and 200% zoom.
 - Larger Area panel and map (400 px / 366 px map on desktop, 280 px map on phones); map drag-to-pan, wheel/pinch zoom and buttons down to 625 m radius; 100 m window becomes ~25 CSS px at max zoom; footprint and numeric centre shown; Alt+arrow fine steps (1% radius).
-- Focus now crops the rendered diorama to the selected square (fragment discard plus cut-edge skirt and clipped shadow depth), frames it tightly (size maps to rendered extent: 100 m close-up tile → 1500 m whole city), closes the picker so the result is visible, keeps the selection for reopening, and never zooms out below the model-fit view. The grey context mask is gone; surrounding geometry is not rendered at all.
+- Focus now crops the rendered diorama to the selected square (fragment discard plus cut-edge skirt and clipped shadow depth), frames it tightly (size maps to rendered extent: 100 m close-up tile → 1500 m whole city), closes the picker so the result is visible, keeps the selection for reopening, and never zooms out below the model-fit view. The grey context mask is gone; only the selected high-detail square is rendered, surrounded by the low-quality OSM context map.
 - Space activates focused controls (global playback shortcut is suppressed); Enter works; Escape closes the Area panel even from inputs and restores focus to Area.
 - Progress/error overlays focus and trap correctly, background is inert; mobile light sheet is a proper dialog.
 - Keyboard diorama navigation: focus `#scene`, arrows pan (Shift larger), `+`/`-` zoom.
 - Filterable **Named places** list in the light panel is an accessible alternative to pointer-only tooltips; pinned tooltips no longer auto-hide.
 - Primary action contrast ≥4.5:1; micro-labels raised to 11 px where feasible; 44 px coarse-pointer targets.
-- Persistent OSM attribution in the time console/Area picker; the main view loads low-resolution OSM context tiles and the About privacy copy discloses both the context and Area tile requests plus coordinate deep links.
+- Persistent OSM attribution in the time console/Area picker; the main view loads low-resolution OSM context tiles and the About privacy copy discloses both the context and Area tile requests plus coordinate deep links. Cached point areas are listed through a bounded nearby query and shown as anonymous footprints.
+- Cached custom areas are reused by exact cache key from the context-map footprints; a fixture-server test verifies that clicking a listed footprint issues no POST/generation and opens the cached key.
 - Notices auto-dismiss with hover/focus pause; raw error codes are behind “Technical details”.
 
 ### Recent E2E checks added
@@ -60,6 +61,7 @@ Measured E2E (1440×900, SwiftShader): last frame **26 draw calls / 439,469 tria
 
 - `brasov-noon.png`, `brasov-golden.png`, `brasov-night.png`, `brasov-mobile.png`
 - `detail-area.png` (offline E2E fallback; production also loads OSM context tiles)
+- `docs/screenshots/cached-areas.webp` shows the optional cached custom-area footprints (captured against the fixture cache).
 - `feature-tooltip.png`
 
 ## Known limitations / remaining work

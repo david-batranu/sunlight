@@ -82,6 +82,15 @@ export interface HoverInfo {
   sticky: boolean;
 }
 
+export interface SceneCachedArea {
+  key: string;
+  name: string;
+  centerX: number;
+  centerZ: number;
+  radiusM: number;
+  current: boolean;
+}
+
 export interface SceneDebug {
   camera: {
     azimuthDeg: number;
@@ -131,6 +140,8 @@ export interface SceneHandle {
   getGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null;
   /** Low-quality context-map point (metres) under a viewport pixel. */
   getMapPoint(clientX: number, clientY: number): { x: number; z: number } | null;
+  /** Draws previously cached point-model footprints on the context map. */
+  setCachedAreas(areas: readonly SceneCachedArea[]): void;
   /** Records the picker selection; rendering is unchanged until Focus. */
   setDetailWindow(window: DetailWindow | null): void;
   /** Crops the rendered city to a detail window and frames it in the view. */

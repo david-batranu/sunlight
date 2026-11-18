@@ -7,6 +7,7 @@
  */
 
 import type {
+  CachedArea,
   CityInfo,
   CitySearchResponse,
   HealthCheck,
@@ -53,6 +54,12 @@ export interface EnsureModelOptions {
   resolved?: ResolvedTarget;
 }
 
+export interface CachedAreaQuery {
+  lat: number;
+  lon: number;
+  radiusM: number;
+}
+
 export interface CityServiceHealth {
   cache: { models: number; bytes: number; maxBytes: number };
   queue: { active: number; queued: number };
@@ -75,6 +82,7 @@ export interface CityService {
   getJob(jobId: string): JobStatus | null;
   cancelJob(jobId: string): boolean;
   readModel(key: string): Promise<ReadyModel | null>;
+  cachedAreas(limit?: number, near?: CachedAreaQuery): CachedArea[];
   health(): CityServiceHealth;
   shutdown(): Promise<void>;
 }

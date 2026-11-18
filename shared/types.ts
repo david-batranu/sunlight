@@ -214,6 +214,22 @@ export interface CreateModelQueued {
 }
 
 export type CreateModelResponse = CreateModelReady | CreateModelQueued;
+/** Public summary of a previously generated point model in the disk cache. */
+export interface CachedArea {
+  key: string;
+  /** Display name of the generated model, usually "Near <city>". */
+  name: string;
+  lat: number;
+  lon: number;
+  radiusM: number;
+  generatedAt: string;
+  degraded: boolean;
+}
+
+export interface CachedAreasResponse {
+  areas: CachedArea[];
+}
+
 
 export interface ApiErrorBody {
   error: ApiError;

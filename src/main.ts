@@ -9,6 +9,7 @@ import './styles/tokens.css';
 import './styles/app.css';
 
 import type {
+  CachedArea,
   CityModel,
   CitySearchResult,
   CreateModelResponse,
@@ -31,6 +32,7 @@ import {
   clampDetailWindow as clampDetailWindowInFrame,
   detailWindowInsideModel,
   detailWindowToGeo,
+  geoToModelPoint,
   type DetailFrame
 } from './app/detail.ts';
 import {
@@ -110,6 +112,8 @@ let loadToken = 0;
 let skyToken = 0;
 const MODEL_CACHE_LIMIT = 4;
 const modelByKey = new Map<string, CityModel>();
+const cachedAreasByKey = new Map<string, CachedArea>();
+let cachedAreasToken = 0;
 
 function rememberModel(model: CityModel): void {
   modelByKey.delete(model.key);
@@ -129,6 +133,73 @@ function recallModel(key: string): CityModel | undefined {
   }
   return model;
 }
+/** Refreshes the public cache list used for context-map markers. */
+async function refreshCachedAreas(): Promise<void> {
+  const token = ++cachedAreasToken;
+  try {
+    const city = store.getState().city;
+    const response = await api.listCachedAreas(city?.lat, city?.lon, 25);
+    if (token !== cachedAreasToken) return;
+    cachedAreasByKey.clear();
+    for (const area of response.areas) cachedAreasByKey.set(area.key, area);
+    syncCachedAreaMarkers();
+  } catch {
+    /* Context markers are optional; the map still works without the cache list. */
+  }
+}
+
+function syncCachedAreaMarkers(): void {
+  const state = store.getState();
+  if (!state.city || !state.model) {
+    scene.setCachedAreas([]);
+    return;
+  }
+  const currentKey = state.model.key;
+  scene.setCachedAreas(
+    [...cachedAreasByKey.values()].map((area) => {
+      const point = geoToModelPoint(state.city!, area.lat, area.lon);
+      return {
+        key: area.key,
+        name: area.name,
+        centerX: point.x,
+        centerZ: point.z,
+        radiusM: area.radiusM,
+        current: area.key === currentKey
+      };
+    })
+  );
+}
+
+/** Opens an already-cached point model without generating a new point key. */
+async function loadCachedArea(area: CachedArea): Promise<void> {
+  const token = ++loadToken;
+  activeTarget = { kind: 'point', lat: area.lat, lon: area.lon, name: area.name };
+  pendingHistoryMode = 'push';
+  labelHint = area.name;
+  activeJobId = null;
+  skyToken += 1;
+  store.setState({
+    phase: 'loading',
+    progress: null,
+    generatingName: area.name,
+    error: null,
+    current: null
+  });
+  try {
+    const model = recallModel(area.key) ?? (await api.loadModel(area.key));
+    await applyModel(model, token, { preserveTime: true });
+  } catch {
+    if (token !== loadToken) return;
+    // The entry may have been evicted between listing and selection: fall back
+    // to the normal generation path at the exact cached target.
+    void loadCity(
+      { kind: 'point', lat: area.lat, lon: area.lon, name: area.name },
+      area.name,
+      { pushHistory: true }
+    );
+  }
+}
+
 let skyCache = new Map<string, SkyDay>();
 let labelHint: string | null = null;
 let userTouchedTime = urlState.date !== null || urlState.minute !== null;
@@ -344,6 +415,8 @@ async function applyModel(model: CityModel, token: number, options: LoadOptions 
   await applySky(date, token);
   if (token === loadToken) {
     store.setState({ phase: 'ready' });
+    syncCachedAreaMarkers();
+    void refreshCachedAreas();
     maybeShowMapHint();
   }
 }
@@ -963,6 +1036,12 @@ function maybeLoadContextMapPoint(clientX: number, clientY: number): void {
   ) {
     return;
   }
+  const cached = findCachedAreaAt(point.x, point.z);
+  if (cached) {
+    addNotice(`Opening cached area: ${cached.name}…`);
+    void loadCachedArea(cached);
+    return;
+  }
   const geo = detailWindowToGeo(state.city, { centerX: point.x, centerZ: point.z });
   const name = `Near ${state.city.name}`;
   addNotice(`Loading a high-detail area near ${state.city.name}…`);
@@ -971,6 +1050,27 @@ function maybeLoadContextMapPoint(clientX: number, clientY: number): void {
     name,
     { pushHistory: true }
   );
+}
+
+/** Finds a cached footprint containing a model-space map point. */
+function findCachedAreaAt(x: number, z: number): CachedArea | null {
+  const state = store.getState();
+  if (!state.city || !state.model) return null;
+  let best: CachedArea | null = null;
+  let bestDistance = Infinity;
+  for (const area of cachedAreasByKey.values()) {
+    if (area.key === state.model.key) continue;
+    const center = geoToModelPoint(state.city, area.lat, area.lon);
+    const dx = Math.abs(x - center.x);
+    const dz = Math.abs(z - center.z);
+    if (dx > area.radiusM + 60 || dz > area.radiusM + 60) continue;
+    const distance = dx * dx + dz * dz;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = area;
+    }
+  }
+  return best;
 }
 
 /* ------------------------------------------------------------------ */

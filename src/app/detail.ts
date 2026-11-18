@@ -13,6 +13,18 @@ import type { DetailWindow } from './contracts.ts';
 
 const METRES_PER_DEGREE = 111_320;
 
+/** Converts a WGS84 point to model-space metres around a city centre. */
+export function geoToModelPoint(
+  city: { lat: number; lon: number },
+  lat: number,
+  lon: number
+): { x: number; z: number } {
+  return {
+    x: (lon - city.lon) * METRES_PER_DEGREE * Math.cos((city.lat * Math.PI) / 180),
+    z: (city.lat - lat) * METRES_PER_DEGREE
+  };
+}
+
 export interface DetailFrame {
   /** Centre of the loaded model / overview, in model metres. */
   centerX: number;

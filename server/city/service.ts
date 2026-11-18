@@ -28,11 +28,13 @@ import type {
   JobStatus,
   ModelMeta,
   ModelTarget,
-  NearestCityResponse
+  NearestCityResponse,
+  CachedArea
 } from '../../shared/types.ts';
 import { buildCityModel, type BuildInput, type BuildProgressEvent } from './build.ts';
 import { CityIndex } from './city-index.ts';
 import type {
+  CachedAreaQuery,
   CityService,
   CityServiceHealth,
   EnsureModelOptions,
@@ -294,6 +296,11 @@ class CityServiceImpl implements CityService {
     if (!this.initialized || !this.jobs) return false;
     if (typeof jobId !== 'string' || jobId.length === 0) return false;
     return this.jobs.cancel(jobId);
+  }
+
+  cachedAreas(limit = 100, near?: CachedAreaQuery): CachedArea[] {
+    if (!this.initialized || !this.cache) return [];
+    return this.cache.cachedAreas(limit, near);
   }
 
   async readModel(key: string): Promise<ReadyModel | null> {

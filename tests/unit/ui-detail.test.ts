@@ -10,7 +10,8 @@ import {
   detailFootprintLabel,
   detailRadiusLabel,
   detailWindowInsideModel,
-  detailWindowToGeo
+  detailWindowToGeo,
+  geoToModelPoint
 } from '../../src/app/detail.ts';
 import {
   DETAIL_DEFAULT_RADIUS_M,
@@ -58,6 +59,9 @@ test('detail centre converts back to WGS84 for loading an area', () => {
   assert.ok(Math.abs(north.lat - (city.lat + 0.01)) < 1e-9);
   const east = detailWindowToGeo(city, { centerX: 1113.2, centerZ: 0 });
   assert.ok(east.lon > city.lon);
+  const model = geoToModelPoint(city, north.lat, east.lon);
+  assert.ok(Math.abs(model.x - 1113.2) < 1e-6);
+  assert.ok(Math.abs(model.z + 1113.2) < 1e-6);
 });
 
 test('detail labels are compact and readable', () => {

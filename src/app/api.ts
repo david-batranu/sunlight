@@ -3,6 +3,7 @@
  */
 
 import type {
+  CachedAreasResponse,
   CityModel,
   CitySearchResponse,
   CreateModelResponse,
@@ -36,6 +37,8 @@ export interface ApiClient {
   getJob(jobId: string): Promise<JobStatus>;
   cancelJob(jobId: string): Promise<void>;
   loadModel(key: string): Promise<CityModel>;
+  /** Public list of previously generated point models. */
+  listCachedAreas(lat?: number, lon?: number, radiusKm?: number): Promise<CachedAreasResponse>;
   loadSky(lat: number, lon: number, date: string): Promise<SkyDay>;
   health(): Promise<HealthResponse>;
 }
@@ -103,6 +106,13 @@ export function createApi(baseUrl = ''): ApiClient {
     },
     loadModel(key) {
       return request<CityModel>(`${base}/api/models/${encodeURIComponent(key)}`);
+    },
+    listCachedAreas(lat, lon, radiusKm = 25) {
+      const params =
+        lat !== undefined && lon !== undefined
+          ? `?${new URLSearchParams({ lat: String(lat), lon: String(lon), radiusKm: String(radiusKm) })}`
+          : '';
+      return request<CachedAreasResponse>(`${base}/api/cached-areas${params}`);
     },
     loadSky(lat, lon, date) {
       const params = new URLSearchParams({ lat: String(lat), lon: String(lon), date });

@@ -1,6 +1,6 @@
 {
   "name": "sunlight",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "description": "An isometric low-poly city diorama with real sun and moon light for any date and time.",

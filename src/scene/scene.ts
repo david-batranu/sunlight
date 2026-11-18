@@ -15,7 +15,13 @@
 import * as THREE from 'three';
 import type { CityModel, SkyDay } from '../../shared/types.ts';
 import { terrainHeightM } from '../../shared/terrain.ts';
-import type { DetailWindow, HitFeature, SceneDebug, SceneHandle } from '../app/contracts.ts';
+import type {
+  DetailWindow,
+  HitFeature,
+  SceneCachedArea,
+  SceneDebug,
+  SceneHandle
+} from '../app/contracts.ts';
 import {
   CAMERA_DISTANCE_M,
   detailFocusZoom,
@@ -256,6 +262,9 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let contextMapTexture: THREE.CanvasTexture | null = null;
   let contextMapMaterial: THREE.MeshStandardMaterial | null = null;
   let contextMapToken = 0;
+  let cachedAreaOverlay: THREE.Mesh | null = null;
+  let cachedAreaTexture: THREE.CanvasTexture | null = null;
+  let cachedAreaMaterial: THREE.MeshBasicMaterial | null = null;
   let disposed = false;
 
   /**
@@ -712,6 +721,108 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   /* SceneHandle                                                       */
   /* ---------------------------------------------------------------- */
 
+  function disposeCachedAreas(): void {
+    if (cachedAreaOverlay) {
+      scene.remove(cachedAreaOverlay);
+      cachedAreaOverlay.geometry.dispose();
+      cachedAreaOverlay = null;
+    }
+    cachedAreaTexture?.dispose();
+    cachedAreaTexture = null;
+    cachedAreaMaterial?.dispose();
+    cachedAreaMaterial = null;
+  }
+
+  /**
+   * Cached-area footprints and labels are painted into one transparent overlay
+   * texture rather than individual meshes: a hundred cached areas remain a
+   * single extra draw call instead of hundreds.
+   */
+  function setCachedAreas(areas: readonly SceneCachedArea[]): void {
+    disposeCachedAreas();
+    if (disposed || areas.length === 0) {
+      needsRender = true;
+      return;
+    }
+    const canvasSize = 2048;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasSize;
+    canvas.height = canvasSize;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const toCanvas = (x: number, z: number): { px: number; py: number } => ({
+      px: ((x + CONTEXT_MAP_HALF_M) / CONTEXT_MAP_SIZE_M) * canvasSize,
+      py: ((z + CONTEXT_MAP_HALF_M) / CONTEXT_MAP_SIZE_M) * canvasSize
+    });
+    let drawn = 0;
+    for (const area of areas) {
+      if (area.current) continue;
+      const center = toCanvas(area.centerX, area.centerZ);
+      const radiusPx = (area.radiusM / CONTEXT_MAP_SIZE_M) * canvasSize;
+      if (
+        center.px + radiusPx < 0 ||
+        center.px - radiusPx > canvasSize ||
+        center.py + radiusPx < 0 ||
+        center.py - radiusPx > canvasSize
+      ) {
+        continue;
+      }
+      context.fillStyle = 'rgba(212, 95, 50, 0.11)';
+      context.strokeStyle = 'rgba(196, 87, 47, 0.85)';
+      context.lineWidth = 2;
+      context.beginPath();
+      context.rect(center.px - radiusPx, center.py - radiusPx, radiusPx * 2, radiusPx * 2);
+      context.fill();
+      context.stroke();
+      context.fillStyle = '#d45f32';
+      context.beginPath();
+      context.arc(center.px, center.py, 6, 0, Math.PI * 2);
+      context.fill();
+
+      const text = `Cached · ${area.name}`;
+      context.font = '600 9px system-ui, sans-serif';
+      const textWidth = Math.min(230, context.measureText(text).width + 14);
+      const textX = Math.max(4, Math.min(canvasSize - textWidth - 4, center.px - textWidth / 2));
+      const textY = Math.max(4, Math.min(canvasSize - 22, center.py - 18));
+      context.fillStyle = 'rgba(255, 248, 232, 0.94)';
+      context.strokeStyle = 'rgba(176, 84, 45, 0.8)';
+      context.lineWidth = 1;
+      context.beginPath();
+      context.roundRect(textX, textY, textWidth, 16, 4);
+      context.fill();
+      context.stroke();
+      context.fillStyle = '#5d3a24';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(text, textX + textWidth / 2, textY + 8, textWidth - 6);
+      drawn += 1;
+    }
+    if (drawn === 0) {
+      needsRender = true;
+      return;
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false
+    });
+    const overlay = new THREE.Mesh(
+      new THREE.PlaneGeometry(CONTEXT_MAP_SIZE_M, CONTEXT_MAP_SIZE_M),
+      material
+    );
+    overlay.rotation.x = -Math.PI / 2;
+    overlay.position.set(0, extents.minY + 1.5, 0);
+    overlay.renderOrder = 2;
+    cachedAreaOverlay = overlay;
+    cachedAreaTexture = texture;
+    cachedAreaMaterial = material;
+    scene.add(overlay);
+    needsRender = true;
+  }
+
   function disposeContextMap(): void {
     contextMapToken += 1;
     if (contextMapPlane) {
@@ -778,6 +889,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     shadowRadius = shadowRadiusFor(extents);
 
     disposeModel();
+    disposeCachedAreas();
     currentModel = model;
     installContextMap(model);
     const buffers = buildModelBuffers(model, extents);
@@ -1039,6 +1151,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     if (disposed) return;
     disposed = true;
     setFocusCrop(null);
+    disposeCachedAreas();
     disposeContextMap();
     cancelAnimationFrame(animationFrame);
     resizeObserver.disconnect();
@@ -1218,6 +1331,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     setSky,
     setTime,
     setQuality,
+    setCachedAreas,
     setDetailWindow,
     focusDetailWindow,
     panBy,

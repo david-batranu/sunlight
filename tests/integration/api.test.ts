@@ -283,3 +283,33 @@ test('health exposes bounded HTTP counters and p95 latency', async () => {
   assert.ok(health.http.rateLimited >= 0);
   assert.ok(health.http.p95Ms >= 0);
 });
+
+test('cached-areas lists generated point models for the context map', async () => {
+  const target = { kind: 'point' as const, lat: 45.6501, lon: 25.6001, name: 'Test area' };
+  const created = await postModel(target);
+  assert.ok(created.status === 200 || created.status === 202);
+  const key = created.body.key;
+  if (created.body.state === 'queued') await pollUntilDone(created.body.jobId);
+
+  const response = await fetch(`${app.url}/api/cached-areas`);
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as {
+    areas: Array<{ key: string; name: string; lat: number; lon: number; radiusM: number }>;
+  };
+  const area = body.areas.find((entry) => entry.key === key);
+  assert.ok(area, `expected ${key} in cached areas`);
+  assert.equal(area.name, 'Test area');
+  assert.ok(Math.abs(area.lat - target.lat) < 1e-9);
+  assert.ok(Math.abs(area.lon - target.lon) < 1e-9);
+  assert.ok(area.radiusM >= 100);
+
+  const nearby = await fetch(`${app.url}/api/cached-areas?lat=45.6501&lon=25.6001&radiusKm=10`);
+  assert.equal(nearby.status, 200);
+  const nearbyBody = (await nearby.json()) as { areas: Array<{ key: string }> };
+  assert.ok(nearbyBody.areas.some((entry) => entry.key === key), 'nearby filter should include the area');
+
+  const far = await fetch(`${app.url}/api/cached-areas?lat=0&lon=0&radiusKm=10`);
+  assert.equal(far.status, 200);
+  const farBody = (await far.json()) as { areas: Array<{ key: string }> };
+  assert.ok(!farBody.areas.some((entry) => entry.key === key), 'far filter should exclude the area');
+});

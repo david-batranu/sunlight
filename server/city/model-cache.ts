@@ -17,7 +17,8 @@
 
 import { mkdir, readdir, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import type { CityInfo, ModelMeta, ModelTarget } from '../../shared/types.ts';
+import type { CachedArea, CityInfo, ModelMeta, ModelTarget } from '../../shared/types.ts';
+import type { CachedAreaQuery } from './contract.ts';
 import { CityError } from './errors.ts';
 import { atomicWriteFile } from './fs-atomic.ts';
 import { isValidModelKey, parseModelKey } from './keys.ts';
@@ -188,6 +189,47 @@ export class ModelCache {
       );
     }
     log.info(`model cache: ${this.entries.size} entries, ${formatBytes(this.totalBytes)}`);
+  }
+
+  /**
+   * Public list of cached point models, most recently used first. City seeds
+   * are not point targets and are intentionally excluded here.
+   */
+  cachedAreas(limit = 100, near?: CachedAreaQuery): CachedArea[] {
+    const max = Math.max(0, Math.min(200, Math.floor(limit)));
+    return [...this.entries.values()]
+      .filter((entry) => entry.target && entry.target.kind === 'point')
+      .filter((entry) => {
+        if (!near || !entry.target || entry.target.kind !== 'point') return true;
+        const dLat = (entry.target.lat - near.lat) * 111_320;
+        const dLon =
+          (entry.target.lon - near.lon) * 111_320 * Math.max(0.01, Math.cos((near.lat * Math.PI) / 180));
+        return Math.hypot(dLat, dLon) <= near.radiusM;
+      })
+      .sort((a, b) => b.lastAccess - a.lastAccess)
+      .slice(0, max)
+      .flatMap((entry) => {
+        if (!entry.target || entry.target.kind !== 'point') return [];
+        const radiusM = parseModelKey(entry.key)?.radiusM ?? entry.meta.radiusM;
+        const generatedAt = entry.meta.generatedAt;
+        if (
+          !Number.isFinite(entry.target.lat) ||
+          !Number.isFinite(entry.target.lon) ||
+          !Number.isFinite(radiusM) ||
+          radiusM <= 0
+        ) {
+          return [];
+        }
+        return [{
+          key: entry.key,
+          name: entry.city?.name || 'Cached area',
+          lat: entry.target.lat,
+          lon: entry.target.lon,
+          radiusM,
+          generatedAt: typeof generatedAt === 'string' ? generatedAt : '',
+          degraded: entry.meta.degraded === true
+        } satisfies CachedArea];
+      });
   }
 
   async read(key: string): Promise<CachedModel | null> {

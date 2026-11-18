@@ -8,7 +8,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { AppConfig } from '../config.ts';
-import type { CreateModelResponse, HealthResponse, JobStatus, ModelTarget } from '../../shared/types.ts';
+import type { CachedAreasResponse, CreateModelResponse, HealthResponse, JobStatus, ModelTarget } from '../../shared/types.ts';
 import { isValidModelKey } from '../city/keys.ts';
 import { CityError, type CityService } from '../city/service.ts';
 import { readJsonBody, requireObject } from '../http/body.ts';
@@ -246,6 +246,27 @@ export function createApiHandler(deps: ApiDependencies): ApiHandler {
 
       if (path === '/api/models') {
         throw methodNotAllowed('POST');
+      }
+
+      if (path === '/api/cached-areas') {
+        if (!isGetOrHead(method)) throw methodNotAllowed('GET, HEAD');
+        enforce(readLimiter, req, 'Too many cached-area requests. Try again in a minute.');
+        const latRaw = url.searchParams.get('lat');
+        const lonRaw = url.searchParams.get('lon');
+        let near: { lat: number; lon: number; radiusM: number } | undefined;
+        if (latRaw !== null || lonRaw !== null) {
+          const lat = parseCoordinate(latRaw, 'lat', -90, 90);
+          const lon = parseCoordinate(lonRaw, 'lon', -180, 180);
+          const radiusKm = Number(url.searchParams.get('radiusKm') || '25');
+          if (!Number.isFinite(radiusKm) || radiusKm < 1 || radiusKm > 200) {
+            throw new HttpError(400, 'INVALID_RADIUS', 'radiusKm must be between 1 and 200.');
+          }
+          near = { lat, lon, radiusM: radiusKm * 1000 };
+        }
+        const response: CachedAreasResponse = { areas: cityService.cachedAreas(100, near) };
+        res.setHeader('Cache-Control', 'no-store');
+        sendJson(res, 200, response);
+        return true;
       }
 
       const jobMatch = /^\/api\/jobs\/([^/]+)$/.exec(path);
