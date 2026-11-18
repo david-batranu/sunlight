@@ -129,6 +129,8 @@ export interface SceneHandle {
   getCameraAzimuth(): number;
   /** Ground-plane point (metres, model space) under a viewport pixel. */
   getGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null;
+  /** Low-quality context-map point (metres) under a viewport pixel. */
+  getMapPoint(clientX: number, clientY: number): { x: number; z: number } | null;
   /** Records the picker selection; rendering is unchanged until Focus. */
   setDetailWindow(window: DetailWindow | null): void;
   /** Crops the rendered city to a detail window and frames it in the view. */

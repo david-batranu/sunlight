@@ -63,7 +63,7 @@ test('seeded first run: Brașov loads, canvas is non-blank, chip is correct', as
       pixels.opaque > pixels.total * 0.5,
       `canvas center is mostly transparent (${pixels.opaque}/${pixels.total} opaque)`
     );
-    assert.ok(debug.render.drawCalls <= 25, `draw calls should stay merged (${debug.render.drawCalls})`);
+    assert.ok(debug.render.drawCalls <= 27, `draw calls should stay bounded (${debug.render.drawCalls})`);
   });
 });
 

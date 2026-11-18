@@ -179,6 +179,18 @@ function addNotice(message: string): void {
   setNotices([...current, message]);
 }
 
+/** Teaches the click-to-load context map once per browser. */
+function maybeShowMapHint(): void {
+  try {
+    if (window.localStorage.getItem('sunlight.contextMapHintSeen') === '1') return;
+    window.localStorage.setItem('sunlight.contextMapHintSeen', '1');
+  } catch {
+    /* storage may be unavailable; don't nag every load */
+    return;
+  }
+  addNotice('Drag to pan the map. Click the low-quality map outside the city to load that area.');
+}
+
 function hideBoot(): void {
   if (!boot || boot.classList.contains('booted')) return;
   boot.classList.add('booted');
@@ -322,7 +334,7 @@ async function applyModel(model: CityModel, token: number, options: LoadOptions 
   document.title = `Sunlight — ${model.city.name}`;
   publishUrl(store.getState());
   if (activeTarget.kind === 'point') {
-    addNotice(`Loaded a high-detail model near ${model.city.name}.`);
+    addNotice(`Loaded high-detail model: ${model.city.name}.`);
   }
   if (model.meta.degraded) {
     addNotice(
@@ -332,6 +344,7 @@ async function applyModel(model: CityModel, token: number, options: LoadOptions 
   await applySky(date, token);
   if (token === loadToken) {
     store.setState({ phase: 'ready' });
+    maybeShowMapHint();
   }
 }
 
@@ -794,6 +807,21 @@ const actions: AppActions = {
 /* ------------------------------------------------------------------ */
 
 let pointerDownAt: { x: number; y: number } | null = null;
+
+function updateMapCursor(clientX: number, clientY: number): void {
+  if (!canvas) return;
+  const frame = currentModelDetailFrame();
+  if (!frame) {
+    canvas.style.cursor = '';
+    return;
+  }
+  const point = scene.getMapPoint(clientX, clientY);
+  const outside =
+    point !== null &&
+    (Math.abs(point.x - frame.centerX) > frame.modelRadiusM ||
+      Math.abs(point.z - frame.centerZ) > frame.modelRadiusM);
+  canvas.style.cursor = outside ? 'crosshair' : '';
+}
 let lastHoverAt = 0;
 let stickyTimer: number | null = null;
 
@@ -878,6 +906,7 @@ canvas.addEventListener('pointermove', (event) => {
   if (event.pointerType !== 'mouse' || event.buttons !== 0) return;
   const state = store.getState();
   if (state.phase !== 'ready') return;
+  updateMapCursor(event.clientX, event.clientY);
   const now = performance.now();
   if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
   lastHoverAt = now;
@@ -888,6 +917,7 @@ canvas.addEventListener('pointermove', (event) => {
 
 canvas.addEventListener('pointerleave', () => {
   hideHover();
+  canvas.style.cursor = '';
   pointerDownAt = null;
 });
 
@@ -909,8 +939,39 @@ canvas.addEventListener('pointerup', (event) => {
   if (moved > 8) return;
 
   const state = store.getState();
-  if (state.phase === 'ready') showTooltip(event.clientX, event.clientY, true);
+  if (state.phase === 'ready') {
+    showTooltip(event.clientX, event.clientY, true);
+    maybeLoadContextMapPoint(event.clientX, event.clientY);
+  }
 });
+
+/**
+ * A single click on the low-quality OSM context map loads a fresh high-detail
+ * model at that point. Clicks on the already-loaded high-detail tile are left
+ * to the normal tooltip/selection path.
+ */
+function maybeLoadContextMapPoint(clientX: number, clientY: number): void {
+  const state = store.getState();
+  if (state.phase !== 'ready' || !state.model || !state.city || state.detailPanelOpen) return;
+  const frame = currentModelDetailFrame();
+  if (!frame) return;
+  const point = scene.getMapPoint(clientX, clientY);
+  if (!point) return;
+  if (
+    Math.abs(point.x - frame.centerX) <= frame.modelRadiusM &&
+    Math.abs(point.z - frame.centerZ) <= frame.modelRadiusM
+  ) {
+    return;
+  }
+  const geo = detailWindowToGeo(state.city, { centerX: point.x, centerZ: point.z });
+  const name = `Near ${state.city.name}`;
+  addNotice(`Loading a high-detail area near ${state.city.name}…`);
+  void loadCity(
+    { kind: 'point', lat: geo.lat, lon: geo.lon, name },
+    name,
+    { pushHistory: true }
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /* UI + subscription                                                  */
@@ -980,6 +1041,7 @@ declare global {
       loadCity: (target: ModelTarget, label?: string | null, options?: LoadOptions) => Promise<void>;
       hitTest: (x: number, y: number) => ReturnType<SceneHandle['hitTest']>;
       getGroundPoint: (x: number, y: number) => ReturnType<SceneHandle['getGroundPoint']>;
+      getMapPoint: (x: number, y: number) => ReturnType<SceneHandle['getMapPoint']>;
       api: typeof api;
       formatMinuteOfDay: typeof formatMinuteOfDay;
     };
@@ -993,6 +1055,7 @@ window.__sunlight = {
   loadCity,
   hitTest: (x, y) => scene.hitTest(x, y),
   getGroundPoint: (x, y) => scene.getGroundPoint(x, y),
+  getMapPoint: (x, y) => scene.getMapPoint(x, y),
   api,
   formatMinuteOfDay
 };

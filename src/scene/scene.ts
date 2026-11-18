@@ -29,6 +29,11 @@ import {
 } from './camera.ts';
 import { DioramaControls } from './controls.ts';
 import { FrameStats } from './frame-stats.ts';
+import {
+  CONTEXT_MAP_HALF_M,
+  CONTEXT_MAP_SIZE_M,
+  loadContextMapTexture
+} from './context-map.ts';
 import { splitMeshByGrid } from './chunks.ts';
 import {
   buildModelBuffers,
@@ -247,6 +252,10 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let currentModel: CityModel | null = null;
   let focusCrop: DetailWindow | null = null;
   let focusRoot: THREE.Group | null = null;
+  let contextMapPlane: THREE.Mesh | null = null;
+  let contextMapTexture: THREE.CanvasTexture | null = null;
+  let contextMapMaterial: THREE.MeshStandardMaterial | null = null;
+  let contextMapToken = 0;
   let disposed = false;
 
   /**
@@ -465,8 +474,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     controls.setModelBounds({
       centerX: extents.centerX,
       centerZ: extents.centerZ,
-      halfX: profile.outerHalfX,
-      halfZ: profile.outerHalfZ
+      halfX: Math.max(profile.outerHalfX, CONTEXT_MAP_HALF_M - 1500),
+      halfZ: Math.max(profile.outerHalfZ, CONTEXT_MAP_HALF_M - 1500)
     });
     controls.setTarget(extents.centerX, extents.centerZ, true);
     updateCamera();
@@ -703,6 +712,65 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   /* SceneHandle                                                       */
   /* ---------------------------------------------------------------- */
 
+  function disposeContextMap(): void {
+    contextMapToken += 1;
+    if (contextMapPlane) {
+      scene.remove(contextMapPlane);
+      contextMapPlane.geometry.dispose();
+      contextMapPlane = null;
+    }
+    contextMapTexture?.dispose();
+    contextMapTexture = null;
+    contextMapMaterial?.dispose();
+    contextMapMaterial = null;
+  }
+
+  function installContextMap(model: CityModel): void {
+    disposeContextMap();
+    const token = contextMapToken;
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xbdb29f,
+      roughness: 1,
+      metalness: 0
+    });
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(CONTEXT_MAP_SIZE_M, CONTEXT_MAP_SIZE_M),
+      material
+    );
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.set(0, extents.minY - 1.5, 0);
+    plane.renderOrder = -1;
+    plane.frustumCulled = false;
+    contextMapPlane = plane;
+    contextMapMaterial = material;
+    scene.add(plane);
+    void loadContextMapTexture(model.city).then((canvas) => {
+      if (disposed || token !== contextMapToken || !canvas || !contextMapPlane) return;
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+      const active = contextMapMaterial;
+      if (active) {
+        active.map = texture;
+        active.color.setHex(0xd4c8b5);
+        active.needsUpdate = true;
+      }
+      contextMapTexture?.dispose();
+      contextMapTexture = texture;
+      needsRender = true;
+    });
+  }
+
+  function getMapPoint(clientX: number, clientY: number): { x: number; z: number } | null {
+    if (!contextMapPlane) return null;
+    const ndc = ndcFromClient(clientX, clientY, canvas.getBoundingClientRect());
+    if (!ndc) return null;
+    pointerNdc.set(ndc[0], ndc[1]);
+    raycaster.setFromCamera(pointerNdc, camera);
+    const hit = raycaster.intersectObject(contextMapPlane, false)[0];
+    return hit ? { x: hit.point.x, z: hit.point.z } : null;
+  }
+
   function setModel(model: CityModel): void {
     if (disposed) return;
     extents = modelExtentsFor(model);
@@ -711,6 +779,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
 
     disposeModel();
     currentModel = model;
+    installContextMap(model);
     const buffers = buildModelBuffers(model, extents);
     addMesh(buffers.plinth, false, true);
     terrainMesh = addMesh(buffers.terrain, true, true);
@@ -970,6 +1039,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     if (disposed) return;
     disposed = true;
     setFocusCrop(null);
+    disposeContextMap();
     cancelAnimationFrame(animationFrame);
     resizeObserver.disconnect();
     window.removeEventListener('resize', scheduleResize);
@@ -1154,6 +1224,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     zoomBy,
     renderNow,
     resetCamera,
+    getMapPoint,
     resize,
     dispose,
     getDebug,

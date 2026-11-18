@@ -1,15 +1,15 @@
 # Sunlight QA report
 
-**Date:** 2026-11-18 · **Version:** 0.2.2
+**Date:** 2026-11-18 · **Version:** 0.2.3
 **Environment:** macOS arm64 (Apple M4 Pro), Node v26.13.1, Chrome headless + SwiftShader for E2E.
-**Result:** GREEN — **419/419** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
+**Result:** GREEN — **421/421** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
 
 ## Commands
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | pass (web + server + tests) |
-| `npm test` | **419/419** pass, offline fixtures, ~12 s |
+| `npm test` | **421/421** pass, offline fixtures, ~12 s |
 | `npm run build` | pass; SPA JS ~687 kB raw / ~184 kB gzip, CSS ~53 kB / ~11 kB gzip |
 | `npm run test:e2e` | **29/29** pass, ~76 s, seed-only server, isolated cache, external browser traffic blocked |
 | `docker compose config` | pass (compose v2; read-only container, cache volume, hardened options) |
@@ -33,7 +33,7 @@
 - Terrain subdivision reduced, unused vertex normals removed, vertex colours packed to Uint8: ~45% less VBO/upload volume.
 - Debug exposes `framesRendered`, median/p95 frame interval, rendered frames/s, quality and DPR.
 
-Measured E2E (1440×900, SwiftShader): last frame **25 draw calls / 439,467 triangles** including the shadow pass; settled wide main pass **14 draws / 245,145 triangles**; a focused 100 m window renders **12 draws / 223,369 triangles** after 3×3 building-chunk frustum culling; idle render **0/s**. Hardware GPU steady state remains 60 fps vsync; true SwiftShader steady cadence is ~5.7 fps (the transient `fps` EMA is replaced by rolling median/p95).
+Measured E2E (1440×900, SwiftShader): last frame **26 draw calls / 439,469 triangles** including the shadow pass and the low-quality context plane; settled wide main pass **15 draws / 245,147 triangles**; a focused 100 m window renders **13 draws / 223,371 triangles** after 3×3 building-chunk frustum culling; idle render **0/s**. Hardware GPU steady state remains 60 fps vsync; true SwiftShader steady cadence is ~5.7 fps (the transient `fps` EMA is replaced by rolling median/p95).
 
 ### Usability / accessibility
 - Area picker now becomes a modal sheet at ≤1180 px wide or ≤620 px tall, so the time console cannot cover it; map is 1:1 and unclipped at 320–430 px widths and 200% zoom.
@@ -44,7 +44,7 @@ Measured E2E (1440×900, SwiftShader): last frame **25 draw calls / 439,467 tria
 - Keyboard diorama navigation: focus `#scene`, arrows pan (Shift larger), `+`/`-` zoom.
 - Filterable **Named places** list in the light panel is an accessible alternative to pointer-only tooltips; pinned tooltips no longer auto-hide.
 - Primary action contrast ≥4.5:1; micro-labels raised to 11 px where feasible; 44 px coarse-pointer targets.
-- Persistent OSM attribution in the time console/Area picker; About privacy copy explicitly discloses OSM tile requests and coordinate deep links.
+- Persistent OSM attribution in the time console/Area picker; the main view loads low-resolution OSM context tiles and the About privacy copy discloses both the context and Area tile requests plus coordinate deep links.
 - Notices auto-dismiss with hover/focus pause; raw error codes are behind “Technical details”.
 
 ### Recent E2E checks added
@@ -64,7 +64,7 @@ Measured E2E (1440×900, SwiftShader): last frame **25 draw calls / 439,467 tria
 
 ## Known limitations / remaining work
 
-- Buildings are split into a 3×3 grid for frustum culling (wide view 25 shadow-inclusive draws, 100 m focus 12 draws / 223k triangles); terrain/roads/areas remain merged, so very high zoom still submits most non-building geometry. Full detail-tile LOD and camera-fitted shadow LOD remain architectural follow-ups.
+- Buildings are split into a 3×3 grid for frustum culling (wide view 26 shadow-inclusive draws including the context plane, 100 m focus 13 draws / 223k triangles); terrain/roads/areas remain merged, so very high zoom still submits most non-building geometry. Full detail-tile LOD and camera-fitted shadow LOD remain architectural follow-ups.
 - Hover picking uses a conservative spatial broad phase: sampled p95 is ≤1.77 ms in the benchmark harness with **0 mismatches over 10,080 rays**; unnamed blockers still block correctly.
 - Cold load still uploads the full merged geometry; off-main-thread geometry building/transferables are future work. Camera-fitted shadow LOD and full detail-tile terrain LOD are deliberately deferred after a measured cost/benefit analysis (orbit-invariant fit would only gain ~1.35–1.7× texel density and risks wide-view shadow regressions).
 - Real VoiceOver/NVDA/TalkBack, Safari/Firefox, physical touch devices and forced-colors/HCM were not tested in this automated pass.

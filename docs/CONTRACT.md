@@ -232,8 +232,8 @@ window; `setDetailWindow({centerX,centerZ,radiusM})` updates it; `focusDetailWin
 fits the camera; and `loadDetailArea()` recentres/generates a new 3 km model at
 the window centre. `SceneHandle.setDetailWindow()` records the picker selection;
 `SceneHandle.focusDetailWindow()` crops the rendered city to the square and
-frames it (snapping under reduced motion). `panBy()`/`zoomBy()` power keyboard
-navigation, and `renderNow()` lets
+frames it (snapping under reduced motion). `getMapPoint()` resolves clicks on the low-quality OSM context plane,
+`panBy()`/`zoomBy()` power keyboard navigation, and `renderNow()` lets
 tests force a readback frame while on-demand rendering is settled. Model-space window
 coordinates are metres relative to the model centre; `detailWindowToGeo()`
 converts the centre back to WGS84.

@@ -7,7 +7,7 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 ## Features
 
 - **Any city** — search a bundled index of ~65,000 populated places, or let the browser locate the nearest one. A custom “my exact location” point is supported too.
-- **Explore wider** — each city model covers a 3 km × 3 km core by default. The **Area** picker opens a **5 km-radius overview** so you can see the surrounding region, drag a high-detail window and load/recenter the diorama at any chosen point. Switching cities always starts at that city’s current local date and time.
+- **Explore wider** — each city model covers a 3 km × 3 km core by default, surrounded by a low-quality OSM map context. Drag to pan the 3D view and **click the surrounding map** to load a high-detail city there, or use the **Area** picker's **5 km-radius overview** for precise placement. Switching cities always starts at that city’s current local date and time.
 - **Know the place** — hover or tap named landmarks, streets, parks and waterways for a tooltip with its name, kind and building height, or browse the filterable **Named places** list. A compact compass rotates with the camera and doubles as a reset-view button. The default view is **NW-up** and you can zoom from the whole city down to a few blocks (**0.45×–32×**).
 - **Focus without reloading** — the **Area** picker shows a larger 5 km-radius overview with surrounding OSM map context (drag to pan, scroll/pinch or buttons to zoom, down to a 625 m radius), plus a draggable high-quality window from **100 m to 1500 m radius**. Inside the loaded city, moving or resizing it is instant and makes no OSM data requests; **Focus** closes the picker, crops the rendered diorama to the square, and frames it — the rest of the city is no longer drawn or grayed out. The window size maps directly to the rendered extent (100 m is a close-up tile, 1500 m is the whole city). **Load area** builds a fresh high-detail model where you point, combining area selection and detail in one tool. Named places are also readable as a filterable list in the light panel for keyboard/screen-reader users.
 - **Real geometry & elevation** — the server fetches OpenStreetMap building footprints, major/local roads, water, parks, hiking trails and railways, then samples public elevation tiles so hills, river valleys and mountains such as Brașov's Tâmpa shape the diorama instead of rendering as flat parks. The result is a compact low-poly model of a 3 km × 3 km city core with names and landmark metadata baked in. Terrain is baked into the seed models and cached with live models; if an elevation source is unreachable the model gracefully falls back to flat ground.
@@ -16,7 +16,7 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 - **Cached once, served fast** — the first visit to a city generates it on the server; the gzipped model is persisted to a disk cache (Docker volume) and served with strong ETags. Degraded models (missing terrain/partial coverage) are marked and use a short cache so a transient provider failure cannot pin a bad model for a year.
 - **Seeded for a fast first run** — eight Romanian cities ship pre-baked: Brașov (default), București, Cluj-Napoca, Timișoara, Iași, Constanța, Sibiu and Oradea.
 - **Warm collector’s-diorama design** — crafted plinth, cream placards, terracotta/gold accents, and a sky backdrop that shifts from daylight to golden hour to moonlit night.
-- **Works offline for seeded cities** — no API key and no external database. The optional 5 km area-map tiles and their attribution are the only third-party browser request; when they fail, the picker falls back to the loaded model and says so.
+- **Works offline for seeded cities** — no API key and no external database. The low-quality OSM context map around the diorama and the Area picker tiles are the only third-party browser requests; when they fail, the 3D city remains usable and the context falls back to a plain base.
 
 ## Screenshots
 
@@ -31,6 +31,9 @@ Pick a city anywhere in the world (or use your current location), drag to explor
 
 ![Mobile layout](docs/screenshots/brasov-mobile.webp)
 *Phone layout with a compact top bar and shorter time sheet, leaving more room for the diorama and its controls.*
+
+![Low-quality context map](docs/screenshots/context-map.webp)
+*The high-detail city sits on a deliberately coarse OSM context map. Drag the 3D view to pan; click outside the sharp tile to load that area as a new high-detail model.*
 
 ![Area picker](docs/screenshots/area-overview.webp)
 *Choose from a 5 km-radius overview: drag the map to pan, scroll/pinch or use the buttons to zoom, and move the draggable window over the area you want. Moving it costs no OSM data requests.*
@@ -168,7 +171,7 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design and [
 - **Sun/moon positions**: [`astronomy-engine`](https://github.com/cosinekitty/astronomy) (MIT).
 - **3D rendering**: [Three.js](https://threejs.org/) (MIT).
 
-No API keys are required. The Area picker fetches a handful of raster tiles directly from OpenStreetMap when opened; all other OSM reads happen server-side. For a high-traffic public deployment, OSM’s public infrastructure is not an appropriate data source — add a commercial provider behind the existing provider interface (Mapbox/Overture) and keep the cache. Low-volume, cache-first personal or team use is the intended mode.
+No API keys are required. The main view and the Area picker fetch a handful of low-resolution raster tiles directly from OpenStreetMap; all other OSM reads happen server-side. For a high-traffic public deployment, OSM’s public infrastructure is not an appropriate data source — add a commercial provider behind the existing provider interface (Mapbox/Overture) and keep the cache. Low-volume, cache-first personal or team use is the intended mode.
 
 ## Configuration
 
@@ -234,7 +237,7 @@ npm test                 # node --test unit + integration, no network
 npm run test:e2e         # Playwright-core with system Chrome, seed city only
 ```
 
-The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 419 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
+The E2E runner blocks external network access in the browser, uses an isolated temporary cache and starts the server on a free port. Screenshots land in `qa/shots/`. If Chrome is not at the default macOS location, set `CHROME_PATH`. The latest browser QA report is in [`qa/report.md`](qa/report.md) (29/29 E2E checks green; unit + integration suite 421 tests). CI runs typecheck, unit/integration tests and the browser E2E suite before publishing a container.
 
 ## Project layout
 
