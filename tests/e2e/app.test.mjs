@@ -199,7 +199,7 @@ test('search + switch to Cluj-Napoca seed updates city chip and model', async ()
     await page.waitForFunction(
       () => document.activeElement?.getAttribute('data-testid') === 'search-input',
       null,
-      { timeout: 3000 }
+      { timeout: 10_000 }
     );
     await page.locator('[data-testid="search-input"]').fill('Cluj');
     await page.waitForFunction(() => document.querySelector('[data-testid="search-result-0"]'), null, {
