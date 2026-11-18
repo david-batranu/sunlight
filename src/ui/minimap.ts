@@ -39,7 +39,7 @@ const TILE_TIMEOUT_MS = 8000;
  * Above this width the picker can sit beside the time console; below it the
  * console would cover the map and actions, so the picker turns into a sheet.
  */
-export const AREA_SHEET_MAX_WIDTH = 1180;
+export const AREA_SHEET_MAX_WIDTH = 1320;
 /** Below this height the picker always becomes a sheet (200 % zoom, landscape). */
 export const AREA_SHEET_MAX_HEIGHT = 620;
 
@@ -61,14 +61,14 @@ export function areaStatusText(inside: boolean): string {
 
 /** Plain-language help under the panel title. */
 export const AREA_HELP_TEXT =
-  'Focus closes this panel and zooms the 3D view to the square; Load area rebuilds the city here. Drag or use arrows; Alt+arrows move in fine 1% steps.';
+  'Focus closes this panel and crops the 3D diorama to the square; Load area rebuilds the city here. Drag the square to move it, drag the map to pan, scroll or pinch to zoom. Alt+arrows move the window in 1% steps.';
 
 /** Canvas accessible name, including radius/footprint and what keys do. */
 export function areaCanvasLabel(radiusM: number, inside: boolean): string {
   const where = inside ? 'inside the loaded city' : 'outside the loaded city';
   return (
     `Area overview. Window ${detailRadiusLabel(radiusM)}, ${detailFootprintLabel(radiusM)}, ${where}. ` +
-    `Drag the frame or use the arrow keys to move the window.`
+    `Drag the frame to move it, drag the map to pan, scroll or pinch to zoom, or use the arrow keys to move the window.`
   );
 }
 
@@ -82,7 +82,7 @@ export function loadAreaTitle(inside: boolean): string {
 /** Explains why "Focus" is unavailable while the window is outside the model. */
 export function focusAreaTitle(inside: boolean): string {
   return inside
-    ? 'Close the picker and zoom the 3D view to this square'
+    ? 'Close the picker and crop the 3D diorama to this square'
     : 'Focus is only available inside the loaded city — use Load area first';
 }
 
@@ -302,7 +302,7 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
       <span class="sl-minimap-footprint" data-testid="detail-footprint">—</span>
     </label>
     <div class="sl-minimap-actions">
-      <button class="sl-btn sl-btn--primary" type="button" data-testid="detail-focus" title="Close the picker and zoom the 3D view to this square">${icon('compass')}<span>Focus</span></button>
+      <button class="sl-btn sl-btn--primary" type="button" data-testid="detail-focus" title="Close the picker and crop the 3D diorama to this square">${icon('compass')}<span>Focus</span></button>
       <button class="sl-btn" type="button" data-testid="detail-load" aria-describedby="sl-area-status">${icon('locate')}<span>Load area</span></button>
     </div>
     <p class="sl-minimap-attrib">Map context © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a></p>
@@ -333,10 +333,19 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
   const mapZoomOut = q<HTMLButtonElement>(element, '[data-testid="detail-map-zoom-out"]');
   const mapScale = q<HTMLElement>(element, '[data-testid="detail-map-scale"]');
 
-  let dragging = false;
+  type DragMode = 'none' | 'window' | 'map';
+  let dragMode: DragMode = 'none';
   let mapZoom = 1;
   let mapCenterX = 0;
   let mapCenterZ = 0;
+  let mapPanned = false;
+  let suppressTileFetch = false;
+  let mapDragStartX = 0;
+  let mapDragStartY = 0;
+  let mapStartCenterX = 0;
+  let mapStartCenterZ = 0;
+  const activePointers = new Map<number, { x: number; y: number }>();
+  let pinchStartDistance = 0;
   let mapModelKey: string | null = null;
   let tileKey: string | null = null;
   let tileStatus: 'idle' | 'loading' | 'ready' | 'failed' = 'idle';
@@ -369,8 +378,8 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
     if (!base) return null;
     return {
       ...base,
-      centerX: mapZoom === 1 ? base.centerX : mapCenterX,
-      centerZ: mapZoom === 1 ? base.centerZ : mapCenterZ,
+      centerX: mapCenterX,
+      centerZ: mapCenterZ,
       contextRadiusM: contextRadiusM()
     };
   }
@@ -391,15 +400,19 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
     const detail = state.detailWindow;
     const base = mapFrame(state);
     if (!detail || !base) return;
+    const previous = mapZoom;
     const next = Math.max(1, Math.min(8, nextZoom));
     if (next === mapZoom) return;
     mapZoom = next;
-    if (next === 1) {
-      mapCenterX = base.centerX;
-      mapCenterZ = base.centerZ;
-    } else {
+    // First zoom-in starts at the selected square; later zoom levels preserve
+    // wherever the user has panned the overview.
+    if (previous === 1 && next > 1 && !mapPanned) {
       mapCenterX = detail.centerX;
       mapCenterZ = detail.centerZ;
+    } else if (next === 1) {
+      mapCenterX = base.centerX;
+      mapCenterZ = base.centerZ;
+      mapPanned = false;
     }
     tileKey = null;
     tileBase = null;
@@ -424,28 +437,91 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
     on(canvas, 'pointerdown', (event) => {
       const pointer = event as PointerEvent;
       const state = ctx.store.getState();
-      const frame = mapFrame(state);
+      const frame = currentFrame(state);
       if (!frame || !state.detailWindow) return;
       pointer.preventDefault();
-      dragging = true;
+      activePointers.set(pointer.pointerId, { x: pointer.clientX, y: pointer.clientY });
       canvas.setPointerCapture(pointer.pointerId);
-      moveWindow(pointer, state.detailWindow);
+      if (activePointers.size === 2) {
+        const points = [...activePointers.values()];
+        pinchStartDistance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+        dragMode = 'none';
+        suppressTileFetch = true;
+        return;
+      }
+      if (activePointers.size > 2) return;
+      const rect = canvas.getBoundingClientRect();
+      const px = ((pointer.clientX - rect.left) / Math.max(1, rect.width)) * MAP_PIXELS;
+      const py = ((pointer.clientY - rect.top) / Math.max(1, rect.height)) * MAP_PIXELS;
+      if (pointerInsideWindow(px, py, frame, state.detailWindow)) {
+        dragMode = 'window';
+        moveWindow(pointer, state.detailWindow);
+        return;
+      }
+      dragMode = 'map';
+      mapDragStartX = pointer.clientX;
+      mapDragStartY = pointer.clientY;
+      mapStartCenterX = mapCenterX;
+      mapStartCenterZ = mapCenterZ;
+      suppressTileFetch = true;
     }),
     on(canvas, 'pointermove', (event) => {
-      if (!dragging) return;
-      const state = ctx.store.getState();
-      if (!state.detailWindow) return;
-      moveWindow(event as PointerEvent, state.detailWindow);
-    }),
-    on(canvas, 'pointerup', (event) => {
-      if (!dragging) return;
-      dragging = false;
-      if (canvas.hasPointerCapture((event as PointerEvent).pointerId)) {
-        canvas.releasePointerCapture((event as PointerEvent).pointerId);
+      const pointer = event as PointerEvent;
+      if (activePointers.has(pointer.pointerId)) {
+        activePointers.set(pointer.pointerId, { x: pointer.clientX, y: pointer.clientY });
+      }
+      if (activePointers.size >= 2) {
+        updatePinch(ctx.store.getState());
+        return;
+      }
+      if (dragMode === 'window') {
+        const state = ctx.store.getState();
+        if (state.detailWindow) moveWindow(pointer, state.detailWindow);
+        return;
+      }
+      if (dragMode === 'map') {
+        const state = ctx.store.getState();
+        if (!state.detailWindow) return;
+        const rect = canvas.getBoundingClientRect();
+        const frame = currentFrame(state);
+        if (!frame || rect.width <= 0 || rect.height <= 0) return;
+        const scale = (MAP_PIXELS - MAP_PAD * 2) / (frame.contextRadiusM * 2);
+        const dxPx = ((pointer.clientX - mapDragStartX) / rect.width) * MAP_PIXELS;
+        const dyPx = ((pointer.clientY - mapDragStartY) / rect.height) * MAP_PIXELS;
+        mapCenterX = mapStartCenterX - dxPx / scale;
+        mapCenterZ = mapStartCenterZ - dyPx / scale;
+        mapPanned = true;
+        tileKey = null;
+        tileBase = null;
+        tileStatus = 'idle';
+        requestRedraw();
       }
     }),
-    on(canvas, 'pointercancel', () => {
-      dragging = false;
+    on(canvas, 'wheel', (event) => {
+      const wheel = event as WheelEvent;
+      if (Math.abs(wheel.deltaY) < 1) return;
+      wheel.preventDefault();
+      setMapZoom(wheel.deltaY < 0 ? mapZoom * 2 : mapZoom / 2, ctx.store.getState());
+    }, { passive: false }),
+    on(canvas, 'pointerup', (event) => {
+      const pointer = event as PointerEvent;
+      activePointers.delete(pointer.pointerId);
+      if (activePointers.size < 2) pinchStartDistance = 0;
+      dragMode = 'none';
+      suppressTileFetch = false;
+      if (canvas.hasPointerCapture(pointer.pointerId)) {
+        canvas.releasePointerCapture(pointer.pointerId);
+      }
+      startTiles(ctx.store.getState());
+      requestRedraw();
+    }),
+    on(canvas, 'pointercancel', (event) => {
+      const pointer = event as PointerEvent;
+      activePointers.delete(pointer.pointerId);
+      dragMode = 'none';
+      pinchStartDistance = 0;
+      suppressTileFetch = false;
+      startTiles(ctx.store.getState());
     }),
     on(canvas, 'keydown', (event) => {
       const keyboard = event as KeyboardEvent;
@@ -495,6 +571,30 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
       centerZ: point.z,
       radiusM: current.radiusM
     });
+  }
+
+  function pointerInsideWindow(px: number, py: number, frame: MapFrame, detail: DetailWindow): boolean {
+    const topLeft = projectToMap(frame, detail.centerX - detail.radiusM, detail.centerZ - detail.radiusM);
+    const bottomRight = projectToMap(frame, detail.centerX + detail.radiusM, detail.centerZ + detail.radiusM);
+    return (
+      px >= Math.min(topLeft.x, bottomRight.x) &&
+      px <= Math.max(topLeft.x, bottomRight.x) &&
+      py >= Math.min(topLeft.y, bottomRight.y) &&
+      py <= Math.max(topLeft.y, bottomRight.y)
+    );
+  }
+
+  function updatePinch(state: AppState): void {
+    if (activePointers.size < 2 || pinchStartDistance <= 0) return;
+    const points = [...activePointers.values()];
+    const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+    if (distance > pinchStartDistance * 1.45 && mapZoom < 8) {
+      setMapZoom(mapZoom * 2, state);
+      pinchStartDistance = distance;
+    } else if (distance < pinchStartDistance / 1.45 && mapZoom > 1) {
+      setMapZoom(mapZoom / 2, state);
+      pinchStartDistance = distance;
+    }
   }
 
   function syncTileUi(): void {
@@ -578,7 +678,9 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
     const detail = state.detailWindow;
     const model = state.model;
     if (!frame || !detail || !model) return;
-    startTiles(state);
+    canvas.dataset.mapCenter = `${Math.round(mapCenterX)},${Math.round(mapCenterZ)}`;
+    canvas.dataset.mapZoom = String(mapZoom);
+    if (!suppressTileFetch) startTiles(state);
     const context = canvas.getContext('2d');
     if (!context) return;
     context.clearRect(0, 0, MAP_PIXELS, MAP_PIXELS);
@@ -659,7 +761,7 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
       element.hidden = false;
       backdrop.hidden = !compact;
       window.setTimeout(() => {
-        if (wasVisible && !dragging) focusEl(canvas);
+        if (wasVisible && dragMode === 'none') focusEl(canvas);
       }, 0);
     } else if (!visible && wasVisible) {
       element.hidden = true;
@@ -674,8 +776,10 @@ export function createDetailMinimap(ctx: UIContext): DetailMinimapHandle {
     if (state.model?.key !== mapModelKey) {
       mapModelKey = state.model?.key ?? null;
       mapZoom = 1;
-      mapCenterX = 0;
-      mapCenterZ = 0;
+      const baseFrame = mapFrame(state);
+      mapCenterX = baseFrame?.centerX ?? 0;
+      mapCenterZ = baseFrame?.centerZ ?? 0;
+      mapPanned = false;
       tileKey = null;
       tileBase = null;
       tileStatus = 'idle';

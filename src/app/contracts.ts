@@ -110,6 +110,8 @@ export interface SceneDebug {
     dpr: number;
   };
   modelKey: string | null;
+  /** Active focus crop, if the view is showing only the selected square. */
+  focus: { centerX: number; centerZ: number; radiusM: number } | null;
 }
 
 export interface SceneHandle {
@@ -127,9 +129,9 @@ export interface SceneHandle {
   getCameraAzimuth(): number;
   /** Ground-plane point (metres, model space) under a viewport pixel. */
   getGroundPoint(clientX: number, clientY: number): { x: number; z: number } | null;
-  /** Applies the dimmed/low-detail context mask around a detail window. */
+  /** Records the picker selection; rendering is unchanged until Focus. */
   setDetailWindow(window: DetailWindow | null): void;
-  /** Fits the camera to a detail window (with context margin). */
+  /** Crops the rendered city to a detail window and frames it in the view. */
   focusDetailWindow(window: DetailWindow): void;
   /** Pan the camera target by a world-space XZ delta. */
   panBy(dx: number, dz: number): void;

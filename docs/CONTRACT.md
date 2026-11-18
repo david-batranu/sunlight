@@ -230,9 +230,10 @@ The lead wires the city service, sky service and static SPA serving.
 `AppActions.toggleDetailPanel()` opens the combined 5 km overview / detail
 window; `setDetailWindow({centerX,centerZ,radiusM})` updates it; `focusDetailWindow()`
 fits the camera; and `loadDetailArea()` recentres/generates a new 3 km model at
-the window centre. `SceneHandle.setDetailWindow()` applies the shader mask and
-`SceneHandle.focusDetailWindow()` handles the camera fit (snapping under reduced
-motion), `panBy()`/`zoomBy()` power keyboard navigation, and `renderNow()` lets
+the window centre. `SceneHandle.setDetailWindow()` records the picker selection;
+`SceneHandle.focusDetailWindow()` crops the rendered city to the square and
+frames it (snapping under reduced motion). `panBy()`/`zoomBy()` power keyboard
+navigation, and `renderNow()` lets
 tests force a readback frame while on-demand rendering is settled. Model-space window
 coordinates are metres relative to the model centre; `detailWindowToGeo()`
 converts the centre back to WGS84.

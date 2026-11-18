@@ -449,6 +449,9 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
     await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === false);
     assert.equal(await page.locator('[data-testid="detail-panel"]').isVisible(), false);
     const defaultFocusZoom = await page.evaluate(() => window.__sunlight.getSceneDebug().camera.zoom);
+    const defaultCrop = await page.evaluate(() => window.__sunlight.getSceneDebug().focus);
+    assert.ok(defaultCrop, 'Focus should crop the rendered city to the selected square');
+    assert.equal(defaultCrop.radiusM, 750);
 
     // Reopen the picker and return to the wide view for the resize/Focus sequence.
     await page.locator('[data-testid="area-pick"]').click();
@@ -457,6 +460,11 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
     await page.waitForFunction(() => window.__sunlight.getSceneDebug().camera.zoom === 1, null, {
       timeout: 5000
     });
+    assert.equal(
+      await page.evaluate(() => window.__sunlight.getSceneDebug().focus),
+      null,
+      'Reset view should restore the full city'
+    );
 
     // Resizing only changes the window; Focus explicitly moves the camera.
     await page.locator('[data-testid="detail-size-input"]').evaluate((input) => {
@@ -483,6 +491,11 @@ test('detail area minimap: drag, resize and focus without reloading the city', a
     );
     const resized = await readState(page);
     assert.equal(resized.detailWindow?.radiusM, 300);
+    assert.deepEqual(
+      await page.evaluate(() => window.__sunlight.getSceneDebug().focus),
+      { centerX: resized.detailWindow.centerX, centerZ: resized.detailWindow.centerZ, radiusM: 300 },
+      'the focus crop should follow the resized window'
+    );
 
     // Reopen the minimap and drag the frame without an API reload.
     await page.locator('[data-testid="area-pick"]').click();
@@ -604,11 +617,42 @@ test('Area picker reflows to a sheet at 200% zoom and small phones without clipp
   });
 });
 
-test('overview map zooms and keyboard navigation works on the diorama', async () => {
+test('overview map pans and zooms, and keyboard navigation works on the diorama', async () => {
   await withPage(async ({ page }) => {
     await gotoReady(page, 'city=gn:683844&date=2026-06-21&time=13:20');
     await page.locator('[data-testid="area-pick"]').click();
     await page.waitForFunction(() => window.__sunlight.getState().detailPanelOpen === true);
+
+    // Dragging empty map space pans the overview; it must not move the window.
+    const canvas = page.locator('[data-testid="detail-canvas"]');
+    const box = await canvas.boundingBox();
+    assert.ok(box);
+    const beforePan = await page.evaluate(() => {
+      const state = window.__sunlight.getState();
+      const canvas = document.querySelector('[data-testid="detail-canvas"]');
+      return {
+        detail: { ...state.detailWindow },
+        mapCenter: canvas.dataset.mapCenter,
+        mapZoom: canvas.dataset.mapZoom
+      };
+    });
+    await page.mouse.move(box.x + 12, box.y + 12);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 72, box.y + 52, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    const afterPan = await page.evaluate(() => {
+      const state = window.__sunlight.getState();
+      const canvas = document.querySelector('[data-testid="detail-canvas"]');
+      return {
+        detail: { ...state.detailWindow },
+        mapCenter: canvas.dataset.mapCenter,
+        mapZoom: canvas.dataset.mapZoom
+      };
+    });
+    assert.deepEqual(afterPan.detail, beforePan.detail, 'panning the map must not move the detail window');
+    assert.notEqual(afterPan.mapCenter, beforePan.mapCenter, 'dragging the map must pan it');
+
     const scale0 = await page.locator('[data-testid="detail-map-scale"]').innerText();
     await page.locator('[data-testid="detail-map-zoom-in"]').click();
     await page.locator('[data-testid="detail-map-zoom-in"]').click();
@@ -616,6 +660,19 @@ test('overview map zooms and keyboard navigation works on the diorama', async ()
     const scale1 = await page.locator('[data-testid="detail-map-scale"]').innerText();
     assert.notEqual(scale1, scale0, 'map zoom must change the scale label');
     assert.match(scale1, /radius/);
+    assert.equal(
+      await page.locator('[data-testid="detail-canvas"]').getAttribute('data-map-zoom'),
+      '4',
+      'map zoom buttons should update the zoom level'
+    );
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(300);
+    assert.equal(
+      await page.locator('[data-testid="detail-canvas"]').getAttribute('data-map-zoom'),
+      '8',
+      'the mouse wheel should zoom the overview map'
+    );
     await page.keyboard.press('Escape');
 
     const before = await page.evaluate(() => window.__sunlight.getSceneDebug().camera);

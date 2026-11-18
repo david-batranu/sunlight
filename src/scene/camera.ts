@@ -191,7 +191,7 @@ export function fitTargetY(extents: ModelExtents, bottomY: number): number {
  * the selection from touching the edges without turning the surrounding city
  * into the subject of the shot.
  */
-export const DETAIL_CONTEXT_FACTOR = 1.06;
+export const DETAIL_CONTEXT_FACTOR = 1;
 /**
  * A focused view is capped at this fraction of the model diameter. It prevents
  * "Focus" on a huge window from pulling the camera out to empty space.

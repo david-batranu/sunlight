@@ -14,6 +14,7 @@
 
 import * as THREE from 'three';
 import type { CityModel, SkyDay } from '../../shared/types.ts';
+import { terrainHeightM } from '../../shared/terrain.ts';
 import type { DetailWindow, HitFeature, SceneDebug, SceneHandle } from '../app/contracts.ts';
 import {
   CAMERA_DISTANCE_M,
@@ -142,6 +143,48 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     flatShading: true
   });
 
+  /** Focus crop: discard every fragment outside the selected square. */
+  const focusUniforms = {
+    uFocusEnabled: { value: 0 },
+    uFocusCenter: { value: new THREE.Vector2(0, 0) },
+    uFocusHalf: { value: new THREE.Vector2(0, 0) }
+  };
+
+  function installFocusDiscard(shader: THREE.WebGLProgramParametersWithUniforms): void {
+    Object.assign(shader.uniforms, focusUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vFocusWorld;')
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvFocusWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform float uFocusEnabled;\nuniform vec2 uFocusCenter;\nuniform vec2 uFocusHalf;\nvarying vec3 vFocusWorld;'
+      )
+      .replace(
+        'void main() {',
+        `void main() {
+        if (uFocusEnabled > 0.5) {
+          vec2 focusDelta = abs(vFocusWorld.xz - uFocusCenter) - uFocusHalf;
+          if (max(focusDelta.x, focusDelta.y) > 0.0) discard;
+        }`
+      );
+  }
+
+  material.onBeforeCompile = installFocusDiscard;
+
+  const focusDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  focusDepthMaterial.onBeforeCompile = installFocusDiscard;
+  const focusSkirtMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6b4a33,
+    roughness: 0.96,
+    metalness: 0.01,
+    flatShading: true,
+    side: THREE.DoubleSide
+  });
+
   /* ---------------------------------------------------------------- */
   /* Lights                                                            */
   /* ---------------------------------------------------------------- */
@@ -202,6 +245,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
   let areasMesh: THREE.Mesh | null = null;
   let modelKey: string | null = null;
   let currentModel: CityModel | null = null;
+  let focusCrop: DetailWindow | null = null;
+  let focusRoot: THREE.Group | null = null;
   let disposed = false;
 
   /**
@@ -624,6 +669,15 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     if (intersections.length === 0) return null;
     // Nearest surface wins; an unnamed face blocks fall-through to features behind.
     const nearest = intersections[0];
+    if (focusCrop) {
+      const point = nearest.point;
+      if (
+        Math.abs(point.x - focusCrop.centerX) > focusCrop.radiusM ||
+        Math.abs(point.z - focusCrop.centerZ) > focusCrop.radiusM
+      ) {
+        return null;
+      }
+    }
     const info = pickInfo.get(nearest.object as THREE.Mesh) ?? null;
     return hitFeatureForFace(currentModel, info, nearest.faceIndex);
   }
@@ -700,6 +754,93 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     // city is muted or discarded outside it.
   }
 
+  function clearFocusSkirt(): void {
+    if (!focusRoot) return;
+    for (const child of focusRoot.children) {
+      if (child instanceof THREE.Mesh) child.geometry.dispose();
+    }
+    scene.remove(focusRoot);
+    focusRoot = null;
+  }
+
+  function buildFocusSkirt(window: DetailWindow): void {
+    clearFocusSkirt();
+    if (!currentModel) return;
+    const half = Math.max(1, window.radiusM);
+    const cx = window.centerX;
+    const cz = window.centerZ;
+    const bottomY = extents.minY - 2;
+    const segments = Math.max(12, Math.min(64, Math.round(half / 24)));
+    const positions: number[] = [];
+    const terrain = currentModel.terrain;
+    const topAt = (x: number, z: number): number =>
+      Math.max(0, Number.isFinite(terrainHeightM(terrain, x, z)) ? terrainHeightM(terrain, x, z) : 0) + 0.12;
+    const addWall = (
+      ax: number,
+      az: number,
+      bx: number,
+      bz: number
+    ): void => {
+      const topA = topAt(ax, az);
+      const topB = topAt(bx, bz);
+      positions.push(
+        ax, bottomY, az,
+        bx, bottomY, bz,
+        bx, topB, bz,
+        ax, bottomY, az,
+        bx, topB, bz,
+        ax, topA, az
+      );
+    };
+    for (let i = 0; i < segments; i += 1) {
+      const a = cx - half + (i / segments) * half * 2;
+      const b = cx - half + ((i + 1) / segments) * half * 2;
+      addWall(a, cz + half, b, cz + half);
+      addWall(a, cz - half, b, cz - half);
+    }
+    for (let i = 0; i < segments; i += 1) {
+      const a = cz - half + (i / segments) * half * 2;
+      const b = cz - half + ((i + 1) / segments) * half * 2;
+      addWall(cx + half, a, cx + half, b);
+      addWall(cx - half, a, cx - half, b);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const mesh = new THREE.Mesh(geometry, focusSkirtMaterial);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.matrixAutoUpdate = false;
+    mesh.updateMatrix();
+    focusRoot = new THREE.Group();
+    focusRoot.name = 'focus-crop';
+    focusRoot.add(mesh);
+    scene.add(focusRoot);
+  }
+
+  function setFocusCrop(next: DetailWindow | null): void {
+    const wasActive = focusCrop !== null;
+    focusCrop = next;
+    if (next) {
+      focusUniforms.uFocusEnabled.value = 1;
+      focusUniforms.uFocusCenter.value.set(next.centerX, next.centerZ);
+      focusUniforms.uFocusHalf.value.set(next.radiusM, next.radiusM);
+      buildFocusSkirt(next);
+      for (const child of modelRoot.children) {
+        if (child instanceof THREE.Mesh) child.customDepthMaterial = focusDepthMaterial;
+      }
+    } else {
+      focusUniforms.uFocusEnabled.value = 0;
+      clearFocusSkirt();
+      for (const child of modelRoot.children) {
+        if (child instanceof THREE.Mesh) child.customDepthMaterial = undefined;
+      }
+    }
+    if (wasActive || next) {
+      invalidateShadows();
+      needsRender = true;
+    }
+  }
+
   function focusDetailWindow(window: DetailWindow): void {
     if (disposed) return;
     // Frame the selected square with surrounding context. The pure helper keeps
@@ -707,6 +848,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     // (the default 750 m window used to zoom *out* from 1.00 to 0.97).
     const modelRadius = currentModel?.meta.radiusM ?? DEFAULT_RADIUS_M;
     const zoom = detailFocusZoom(halfHeight, modelRadius, window.radiusM);
+    setFocusCrop(window);
     controls.setFocus(window.centerX, window.centerZ, zoom);
     if (prefersReducedMotion()) {
       controls.snap();
@@ -759,6 +901,7 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
 
   function resetCamera(): void {
     if (disposed) return;
+    setFocusCrop(null);
     controls.reset();
     updateCamera();
   }
@@ -816,13 +959,17 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
         shadow: active.castShadow
       },
       render,
-      modelKey
+      modelKey,
+      focus: focusCrop
+        ? { centerX: focusCrop.centerX, centerZ: focusCrop.centerZ, radiusM: focusCrop.radiusM }
+        : null
     };
   }
 
   function dispose(): void {
     if (disposed) return;
     disposed = true;
+    setFocusCrop(null);
     cancelAnimationFrame(animationFrame);
     resizeObserver.disconnect();
     window.removeEventListener('resize', scheduleResize);
@@ -836,6 +983,8 @@ export function createScene(canvas: HTMLCanvasElement): SceneHandle {
     moonLight.shadow.map?.dispose();
     sunLight.dispose();
     moonLight.dispose();
+    focusDepthMaterial.dispose();
+    focusSkirtMaterial.dispose();
     hemisphere.dispose();
     material.dispose();
     renderer.dispose();

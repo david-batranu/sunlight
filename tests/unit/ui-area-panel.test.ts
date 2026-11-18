@@ -14,8 +14,9 @@ import {
 test('the area picker switches to a sheet before the time console can cover it', () => {
   // Wide desktop stays a non-modal panel.
   assert.equal(areaPanelMode(1440, 900), 'panel');
+  assert.equal(areaPanelMode(1440, 900), 'panel');
   assert.equal(areaPanelMode(1366, 768), 'panel');
-  assert.equal(areaPanelMode(1181, 768), 'panel');
+  assert.equal(areaPanelMode(1321, 768), 'panel');
   // 200 % zoom, laptop widths and short windows become a modal sheet.
   assert.equal(areaPanelMode(720, 450), 'sheet');
   assert.equal(areaPanelMode(1024, 768), 'sheet');
@@ -43,6 +44,7 @@ test('canvas label includes the window size and keyboard instructions', () => {
   assert.match(label, /1\.5 × 1\.5 km/);
   assert.match(label, /inside the loaded city/);
   assert.match(label, /arrow keys/);
+  assert.match(label, /drag the map/);
   assert.match(areaCanvasLabel(100, false), /outside the loaded city/);
 });
 
@@ -50,9 +52,10 @@ test('load/focus explanations flip with the loaded-model context', () => {
   assert.match(loadAreaTitle(true), /already inside the loaded city/);
   assert.match(loadAreaTitle(true), /Focus/);
   assert.match(loadAreaTitle(false), /Build/);
-  assert.match(focusAreaTitle(true), /zoom/);
+  assert.match(focusAreaTitle(true), /crop/);
   assert.match(focusAreaTitle(false), /Load area/);
   assert.match(AREA_HELP_TEXT, /Focus closes this panel/);
-  assert.match(AREA_HELP_TEXT, /zooms the 3D view/);
+  assert.match(AREA_HELP_TEXT, /crops the 3D diorama/);
+  assert.match(AREA_HELP_TEXT, /drag the map/);
   assert.match(AREA_HELP_TEXT, /Load area rebuilds the city/);
 });

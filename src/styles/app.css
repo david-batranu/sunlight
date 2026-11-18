@@ -2949,10 +2949,10 @@
   z-index: var(--z-panel);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 244px;
-  max-height: calc(100dvh - 164px);
-  padding: 10px 12px;
+  gap: 8px;
+  width: 400px;
+  max-height: calc(100dvh - 96px);
+  padding: 14px 16px;
   overflow-y: auto;
   overscroll-behavior: contain;
   transform: translateX(-50%);
@@ -2983,7 +2983,7 @@
   display: block;
   margin-top: 2px;
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--ink-800);
 }
@@ -2999,14 +2999,14 @@
 .sl-minimap-help {
   margin: 0;
   color: var(--ink-600);
-  font-size: 11.5px;
+  font-size: 12.5px;
   line-height: 1.4;
 }
 
 .sl-minimap-map {
   position: relative;
   flex: 0 0 auto;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   margin: 0 auto;
   overflow: hidden;
@@ -3018,7 +3018,7 @@
 
 .sl-minimap-canvas {
   display: block;
-  width: 160px;
+  width: 100%;
   max-width: 100%;
   height: auto;
   margin: 0 auto;
@@ -3195,7 +3195,7 @@
     'attrib attrib';
   align-items: start;
   gap: 8px 14px;
-  width: min(680px, calc(100vw - 20px));
+  width: min(840px, calc(100vw - 20px));
   max-height: calc(100dvh - 76px - var(--safe-top) - var(--safe-bottom));
   padding: 12px 14px;
   overflow-y: auto;
@@ -3216,6 +3216,7 @@
 
 .sl-minimap[data-mode='sheet'] .sl-minimap-map {
   grid-area: map;
+  width: fit-content;
   align-self: start;
 }
 
@@ -3225,7 +3226,7 @@
 
 @media (min-height: 521px) {
   .sl-minimap[data-mode='sheet'] .sl-minimap-canvas {
-    width: clamp(160px, 22vw, 200px);
+    width: clamp(220px, 30vw, 300px);
   }
 }
 
@@ -3277,6 +3278,14 @@
 
 /* Phones: full-width bottom sheet with a big, unobstructed 1:1 map. */
 @media (max-width: 680px) {
+  .sl-minimap[data-mode='sheet'] .sl-minimap-actions {
+    position: sticky;
+    bottom: -1px;
+    z-index: 2;
+    padding: 8px 0 2px;
+    background: var(--panel-bg);
+  }
+
   .sl-minimap[data-mode='sheet'] {
     top: auto;
     right: 0;
@@ -3294,7 +3303,7 @@
   }
 
   .sl-minimap[data-mode='sheet'] .sl-minimap-canvas {
-    width: min(224px, calc(100vw - 72px));
+    width: min(280px, calc(100vw - 48px));
   }
 
   .sl-minimap[data-mode='sheet'] .sl-minimap-status {

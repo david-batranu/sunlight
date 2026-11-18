@@ -1,6 +1,6 @@
 # Sunlight QA report
 
-**Date:** 2026-11-18 · **Version:** 0.2.1
+**Date:** 2026-11-18 · **Version:** 0.2.2
 **Environment:** macOS arm64 (Apple M4 Pro), Node v26.13.1, Chrome headless + SwiftShader for E2E.
 **Result:** GREEN — **419/419** unit + integration tests, **29/29** browser E2E checks, typecheck clean, production build clean.
 
@@ -37,8 +37,8 @@ Measured E2E (1440×900, SwiftShader): last frame **25 draw calls / 439,467 tria
 
 ### Usability / accessibility
 - Area picker now becomes a modal sheet at ≤1180 px wide or ≤620 px tall, so the time console cannot cover it; map is 1:1 and unclipped at 320–430 px widths and 200% zoom.
-- Map zoom down to 625 m radius; 100 m window becomes ~25 CSS px at max zoom; footprint and numeric centre shown; Alt+arrow fine steps (1% radius).
-- Focus now frames the selected square tightly (size maps to zoom: 100 m close-up → 1500 m whole city), closes the picker so the view is visible, keeps the selection for reopening, and never zooms out below the model-fit view. The grey context mask was removed; surrounding geometry is no longer rendered muted.
+- Larger Area panel and map (400 px / 366 px map on desktop, 280 px map on phones); map drag-to-pan, wheel/pinch zoom and buttons down to 625 m radius; 100 m window becomes ~25 CSS px at max zoom; footprint and numeric centre shown; Alt+arrow fine steps (1% radius).
+- Focus now crops the rendered diorama to the selected square (fragment discard plus cut-edge skirt and clipped shadow depth), frames it tightly (size maps to rendered extent: 100 m close-up tile → 1500 m whole city), closes the picker so the result is visible, keeps the selection for reopening, and never zooms out below the model-fit view. The grey context mask is gone; surrounding geometry is not rendered at all.
 - Space activates focused controls (global playback shortcut is suppressed); Enter works; Escape closes the Area panel even from inputs and restores focus to Area.
 - Progress/error overlays focus and trap correctly, background is inert; mobile light sheet is a proper dialog.
 - Keyboard diorama navigation: focus `#scene`, arrows pan (Shift larger), `+`/`-` zoom.
@@ -51,7 +51,7 @@ Measured E2E (1440×900, SwiftShader): last frame **25 draw calls / 439,467 tria
 - Seeded first run / canvas readback with the on-demand renderer.
 - Deep link date/sun position; date/time controls; city search, geolocation and city switching.
 - Camera pan/orbit/zoom/reset; compass; tooltips; playback.
-- Area picker open, default Focus tight zoom + picker close + selection restore, resize-without-camera, drag without reload, Escape/close/focus return.
+- Area picker open, default Focus crop + tight frame + picker close + selection restore, resize-without-camera, drag without reload, Escape/close/focus return.
 - 200%-zoom and 375×667 Area sheet/map layout; Space-on-controls; Today-preserves-time vs Now; overview map zoom; keyboard pan/zoom; Named places list; mobile layout and reduced motion.
 
 ## Screenshots
