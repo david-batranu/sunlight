@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM node:25-bookworm-slim AS build
 WORKDIR /app
 ENV npm_config_cache=/tmp/npm-cache
 # Relative asset base keeps the image portable across root and subpath deployments.
@@ -22,7 +22,7 @@ COPY tests ./tests
 
 RUN npm run build
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:25-bookworm-slim AS runtime
 ARG GIT_SHA=""
 ARG IMAGE_TAG=""
 ENV NODE_ENV=production \
